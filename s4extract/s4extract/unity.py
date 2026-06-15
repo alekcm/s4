@@ -609,7 +609,7 @@ def write_editor_material_fixer(out_root: str, pipeline: str,
     """
     editor_dir = os.path.join(out_root, "Editor")
     os.makedirs(editor_dir, exist_ok=True)
-    runtime_breakable_class, _runtime_script = write_breakable_runtime_script(out_root)
+    runtime_breakable_class = "S4BreakablePart"
     class_suffix = hashlib.md5((out_root + pipeline).encode("utf-8")).hexdigest()[:10]
     class_name = f"S4ExtractMaterialFixer_{class_suffix}"
     script_path = os.path.join(editor_dir, class_name + ".cs")
@@ -771,14 +771,12 @@ public static class {class_name}
         }}
 
         int assigned = AssignMappedMaterialsToSceneMeshes();
-        string readyPrefab = CreateReadyPrefab();
         string partsPrefab = CreatePartsPrefab();
-        string breakablePrefab = CreateBreakablePrefab();
 
-        if (changed > 0 || assigned > 0 || !string.IsNullOrEmpty(readyPrefab) || !string.IsNullOrEmpty(partsPrefab) || !string.IsNullOrEmpty(breakablePrefab))
+        if (changed > 0 || assigned > 0 || !string.IsNullOrEmpty(partsPrefab))
         {{
             AssetDatabase.SaveAssets();
-            Debug.Log("s4extract: fixed " + changed + " material(s), assigned mapped materials to " + assigned + " renderer(s), ready prefab: " + readyPrefab + ", parts prefab: " + partsPrefab + ", breakable prefab: " + breakablePrefab + ", shader: " + shader.name);
+            Debug.Log("s4extract: fixed " + changed + " material(s), assigned mapped materials to " + assigned + " renderer(s), parts prefab: " + partsPrefab + ", shader: " + shader.name);
         }}
     }}
 
@@ -843,37 +841,39 @@ public static class {class_name}
             GameObject model = FindModelAsset(pa.assetName);
             if (model == null) continue;
             Material target = FindMaterial(pa.materialName) ?? first;
-            GameObject child = (GameObject)PrefabUtility.InstantiatePrefab(model);
-            if (child == null) child = Object.Instantiate(model);
-            child.name = pa.assetName;
-            child.transform.SetParent(root.transform, false);
 
-            foreach (Renderer r in child.GetComponentsInChildren<Renderer>(true))
+            GameObject pieceRoot = new GameObject(pa.assetName);
+            pieceRoot.transform.SetParent(root.transform, false);
+            var breakable = pieceRoot.AddComponent<{runtime_breakable_class}>();
+            breakable.breakOnCollision = false;
+            breakable.breakImpulseThreshold = 8f;
+
+            GameObject intact = (GameObject)PrefabUtility.InstantiatePrefab(model);
+            if (intact == null) intact = Object.Instantiate(model);
+            intact.name = "Intact";
+            intact.transform.SetParent(pieceRoot.transform, false);
+            ApplyMaterialAndPhysics(intact, target, 2f);
+            breakable.intactRoot = intact;
+
+            BreakSpec spec;
+            var brokenRoots = new System.Collections.Generic.List<GameObject>();
+            if (TryGetBreakSpec(pa.assetName, out spec) && spec.brokenAssetNames != null)
             {{
-                Material[] mats = r.sharedMaterials;
-                if (mats == null || mats.Length == 0) mats = new Material[] {{ target }};
-                for (int i = 0; i < mats.Length; i++) mats[i] = target;
-                r.sharedMaterials = mats;
+                for (int i = 0; i < spec.brokenAssetNames.Length; i++)
+                {{
+                    string brokenAssetName = spec.brokenAssetNames[i];
+                    GameObject brokenModel = FindModelAsset(brokenAssetName);
+                    if (brokenModel == null) continue;
+                    GameObject broken = (GameObject)PrefabUtility.InstantiatePrefab(brokenModel);
+                    if (broken == null) broken = Object.Instantiate(brokenModel);
+                    broken.name = "Broken_" + i;
+                    broken.transform.SetParent(pieceRoot.transform, false);
+                    ApplyMaterialAndPhysics(broken, target, 1f);
+                    broken.SetActive(false);
+                    brokenRoots.Add(broken);
+                }}
             }}
-
-            Rigidbody rb = child.GetComponent<Rigidbody>();
-            if (rb == null) rb = child.AddComponent<Rigidbody>();
-            rb.mass = 2f;
-            rb.drag = 0.05f;
-            rb.angularDrag = 0.05f;
-            rb.useGravity = true;
-            rb.isKinematic = false;
-            rb.interpolation = RigidbodyInterpolation.Interpolate;
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
-
-            foreach (MeshFilter mf in child.GetComponentsInChildren<MeshFilter>(true))
-            {{
-                if (mf.sharedMesh == null) continue;
-                MeshCollider mc = mf.GetComponent<MeshCollider>();
-                if (mc == null) mc = mf.gameObject.AddComponent<MeshCollider>();
-                mc.sharedMesh = mf.sharedMesh;
-                mc.convex = true;
-            }}
+            breakable.brokenRoots = brokenRoots.ToArray();
             added++;
         }}
 
@@ -886,6 +886,50 @@ public static class {class_name}
         PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
         Object.DestroyImmediate(root);
         return prefabPath;
+    }}
+
+    static bool TryGetBreakSpec(string intactAssetName, out BreakSpec spec)
+    {{
+        foreach (BreakSpec bs in BreakSpecs)
+        {{
+            if (bs.intactAssetName == intactAssetName)
+            {{
+                spec = bs;
+                return true;
+            }}
+        }}
+        spec = default;
+        return false;
+    }}
+
+    static void ApplyMaterialAndPhysics(GameObject root, Material target, float mass)
+    {{
+        foreach (Renderer r in root.GetComponentsInChildren<Renderer>(true))
+        {{
+            Material[] mats = r.sharedMaterials;
+            if (mats == null || mats.Length == 0) mats = new Material[] {{ target }};
+            for (int i = 0; i < mats.Length; i++) mats[i] = target;
+            r.sharedMaterials = mats;
+        }}
+
+        Rigidbody rb = root.GetComponent<Rigidbody>();
+        if (rb == null) rb = root.AddComponent<Rigidbody>();
+        rb.mass = mass;
+        rb.drag = 0.05f;
+        rb.angularDrag = 0.05f;
+        rb.useGravity = true;
+        rb.isKinematic = false;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+
+        foreach (MeshFilter mf in root.GetComponentsInChildren<MeshFilter>(true))
+        {{
+            if (mf.sharedMesh == null) continue;
+            MeshCollider mc = mf.GetComponent<MeshCollider>();
+            if (mc == null) mc = mf.gameObject.AddComponent<MeshCollider>();
+            mc.sharedMesh = mf.sharedMesh;
+            mc.convex = true;
+        }}
     }}
 
     static string CreateBreakablePrefab()
