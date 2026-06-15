@@ -1,49 +1,112 @@
 """Parser for Sims 4 MODL/MLOD object resources (furniture) inside RCOL.
 
-Reverse-engineered against real Sims 4 packages. Key real-world findings:
+Important real-world findings:
 
 * MLOD version 0x0205 group records are variable-length; we use ``subset_bytes``
   (the first DWORD of each group) to jump reliably to the next group.
-* VRTF uses D3DDECLUSAGE codes (D3D9): 0=Position, 3=Normal, 5=TexCoord.
-  Older builds accidentally treated usage 3 as UV, so object FBX files were
-  exported without UVs and Unity could only show flat material colors.
-  Positions are commonly Half4/Short4 (use xyz).
+* Real Sims 4 object VRTF layouts use the **Sims 4 / s4pi semantic enum**, not
+  the D3DDECLUSAGE values some older reverse-engineering notes assumed.
+  In common furniture files that means:
+
+    - usage 0 = Position
+    - usage 1 = Normal
+    - usage 2 = UV (channel selected by ``usage_index``)
+    - usage 3 = BlendIndex
+    - usage 4 = BlendWeight
+    - usage 5 = Tangent
+    - usage 6 = Colour
+
+  Older builds in this repo treated usage 5 as TEXCOORD and therefore read the
+  tangent bytes as UVs. That is the root cause of the "material scale does not
+  match the mesh" problem the user reported.
 * VBUF header = 16 bytes (sig+ver+flags+swizzleRef), then interleaved verts.
+* In the common TS4 object layout, UVs are stored as **Short2** and must be
+  multiplied by the material ``UVScales`` parameter (or 1/32767 fallback).
 * IBUF version 2 has a 16-byte header and stores **delta-encoded** 16-bit
   indices (each value is a signed delta added to a running accumulator).
 * Chunk references in the group record are resolved by verifying the target
   chunk's 4-byte signature (the raw ref numbering varies between files).
+
+We keep a small compatibility path for the repo's older synthetic fixture,
+which used a legacy usage/format mapping.
 """
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass, field
 
 
-# D3DDECLUSAGE codes used by VRTF (D3D9 declaration usage values)
-USAGE_POSITION = 0
-USAGE_BLENDWEIGHT = 1
-USAGE_BLENDINDICES = 2
-USAGE_NORMAL = 3
-USAGE_PSIZE = 4
-USAGE_UV = 5            # TEXCOORD
-USAGE_TANGENT = 6
-USAGE_BINORMAL = 7
-USAGE_COLOR = 10
+# ---------------------------------------------------------------------------
+# Real Sims 4 / s4pi object VRTF semantic usage codes
+# ---------------------------------------------------------------------------
+S4_USAGE_POSITION = 0
+S4_USAGE_NORMAL = 1
+S4_USAGE_UV = 2
+S4_USAGE_BLENDINDEX = 3
+S4_USAGE_BLENDWEIGHT = 4
+S4_USAGE_TANGENT = 5
+S4_USAGE_COLOR = 6
 
-# VRTF data format -> byte size. (Half-based formats are the common case in TS4.)
-# Sizes are derived from real files; when unknown we infer from element offsets.
+# Real Sims 4 / s4pi object VRTF element formats
+S4_FMT_FLOAT1 = 0
+S4_FMT_FLOAT2 = 1
+S4_FMT_FLOAT3 = 2
+S4_FMT_FLOAT4 = 3
+S4_FMT_UBYTE4 = 4
+S4_FMT_COLOR_UBYTE4 = 5
+S4_FMT_SHORT2 = 6
+S4_FMT_SHORT4 = 7
+S4_FMT_UBYTE4N = 8
+S4_FMT_SHORT2N = 9
+S4_FMT_SHORT4N = 10
+S4_FMT_USHORT2N = 11
+S4_FMT_USHORT4N = 12
+S4_FMT_DEC3N = 13
+S4_FMT_UDEC3N = 14
+S4_FMT_FLOAT16_2 = 15
+S4_FMT_FLOAT16_4 = 16
+
+# ---------------------------------------------------------------------------
+# Legacy compatibility path used by this repo's old synthetic fixture
+# ---------------------------------------------------------------------------
+LEGACY_USAGE_POSITION = 1
+LEGACY_USAGE_NORMAL = 2
+LEGACY_USAGE_UV = 3
+
+# VRTF data format -> byte size. For real TS4 object files the values match the
+# s4pi VRTF.ElementFormat enum above. We keep a couple of legacy entries so the
+# synthetic fixture built for an older parser still loads.
 VRTF_FORMAT_SIZE = {
-    1: 4,    # Float1
-    2: 8,    # Float2
-    3: 12,   # Float3
-    4: 4,    # (UV) packed - 4 bytes in observed files
-    5: 4,    # UByte4 / packed
-    6: 4,    # ColorUByte4 / packed normal
-    7: 8,    # Half4 (position)
-    8: 4,    # Short2 / Half2 (4 bytes)
-    9: 4,    # Half2
-    10: 8,   # Half4
+    # real TS4 / s4pi layout
+    S4_FMT_FLOAT1: 4,
+    S4_FMT_FLOAT2: 8,
+    S4_FMT_FLOAT3: 12,
+    S4_FMT_FLOAT4: 16,
+    S4_FMT_UBYTE4: 4,
+    S4_FMT_COLOR_UBYTE4: 4,
+    S4_FMT_SHORT2: 4,
+    S4_FMT_SHORT4: 8,
+    S4_FMT_UBYTE4N: 4,
+    S4_FMT_SHORT2N: 4,
+    S4_FMT_SHORT4N: 8,
+    S4_FMT_USHORT2N: 4,
+    S4_FMT_USHORT4N: 8,
+    S4_FMT_DEC3N: 4,
+    S4_FMT_UDEC3N: 4,
+    S4_FMT_FLOAT16_2: 4,
+    S4_FMT_FLOAT16_4: 8,
+    # legacy synthetic-fixture aliases
+    1: 4,
+    2: 8,
+    3: 12,
+    4: 4,
+    5: 4,
+    6: 4,
+    7: 8,
+    8: 4,
+    9: 4,
+    10: 8,
 }
 
 
@@ -71,6 +134,7 @@ class ObjMesh:
     faces: list = field(default_factory=list)
     bbox_min: tuple = (0.0, 0.0, 0.0)
     bbox_max: tuple = (0.0, 0.0, 0.0)
+    material_ref: int | None = None
 
     @property
     def vertex_count(self):
@@ -79,6 +143,17 @@ class ObjMesh:
     @property
     def face_count(self):
         return len(self.faces)
+
+
+@dataclass
+class MaterialVariant:
+    variant_id: int = 0
+    shader: int | None = None
+    diffuse_key: tuple[int, int, int] | None = None   # (type, group, instance)
+    normal_key: tuple[int, int, int] | None = None
+    specular_key: tuple[int, int, int] | None = None
+    emission_key: tuple[int, int, int] | None = None
+    uv_scale: float | None = None
 
 
 class RCOL:
@@ -154,69 +229,136 @@ def _read_half(buf, off):
     return struct.unpack_from("<e", buf, off)[0]
 
 
-def _read_position(buf, base, el):
-    """Decode a vertex position.
+def _vrtf_scheme(vrtf: VRTF) -> str:
+    usages = {el.usage for el in vrtf.elements}
+    return "s4" if S4_USAGE_POSITION in usages else "legacy"
 
-    Real Sims 4 object meshes (fmt 7, 8-byte element) store the position as
-    **Short4 normalized**: (x, y, z, w) as int16. The actual coordinate is
-    ``component / 32767 / w_norm`` where ``w_norm = w/32767`` is a per-vertex
-    scale (commonly 0.5 -> overall scale 2). We compute the scale from w so we
-    don't hardcode it. Float3 and Half3 are also supported as fallbacks.
-    """
+
+def _read_position(buf, base, el, scheme: str):
     off = base + el.offset
 
-    # Float3 (12 bytes)
-    if el.fmt == 3 or el.size >= 12:
+    # Legacy synthetic fixture path used by old tests in this repo.
+    if scheme == "legacy":
+        if el.fmt == 3 or el.size >= 12:
+            return struct.unpack_from("<3f", buf, off)
+        if el.size >= 8:
+            sx, sy, sz, sw = struct.unpack_from("<4h", buf, off)
+            w = sw / 32767.0
+            scale = (1.0 / w) if abs(w) > 1e-6 else 1.0
+            return (sx / 32767.0 * scale,
+                    sy / 32767.0 * scale,
+                    sz / 32767.0 * scale)
+        if el.size >= 6:
+            x = _read_half(buf, off)
+            y = _read_half(buf, off + 2)
+            z = _read_half(buf, off + 4)
+            return (float(x), float(y), float(z))
+        x = _read_half(buf, off)
+        y = _read_half(buf, off + 2)
+        return (float(x), float(y), 0.0)
+
+    # Real TS4 object meshes: common position format is Short4 with the 4th
+    # component acting as a scalar. This matches Sims4Tools / s4pi.
+    if el.fmt in (S4_FMT_SHORT4, S4_FMT_USHORT4N) and el.size >= 8:
+        sx, sy, sz, sw = struct.unpack_from("<4h", buf, off)
+        scalar = float(sw)
+        if abs(scalar) < 1e-6:
+            scalar = 32767.0
+        return (sx / scalar, sy / scalar, sz / scalar)
+
+    if el.fmt == S4_FMT_FLOAT3 and el.size >= 12:
         return struct.unpack_from("<3f", buf, off)
 
-    # 8-byte element: Short4 normalized (the real TS4 object format)
-    if el.size >= 8:
-        sx, sy, sz, sw = struct.unpack_from("<4h", buf, off)
-        w = sw / 32767.0
-        scale = (1.0 / w) if abs(w) > 1e-6 else 1.0
-        return (sx / 32767.0 * scale,
-                sy / 32767.0 * scale,
-                sz / 32767.0 * scale)
-
-    # 6-byte: Half3
-    if el.size >= 6:
+    if el.fmt == S4_FMT_FLOAT16_4 and el.size >= 8:
         x = _read_half(buf, off)
         y = _read_half(buf, off + 2)
         z = _read_half(buf, off + 4)
         return (float(x), float(y), float(z))
 
-    # 4-byte fallback: Half2
-    x = _read_half(buf, off)
-    y = _read_half(buf, off + 2)
-    return (float(x), float(y), 0.0)
+    # Best-effort fallback.
+    if el.size >= 12:
+        return struct.unpack_from("<3f", buf, off)
+    if el.size >= 8:
+        sx, sy, sz, sw = struct.unpack_from("<4h", buf, off)
+        scalar = float(sw) if abs(float(sw)) > 1e-6 else 32767.0
+        return (sx / scalar, sy / scalar, sz / scalar)
+    return (0.0, 0.0, 0.0)
 
 
-def _read_uv(buf, base, el):
-    """Decode a TEXCOORD element.
-
-    Sims 4 object VRTF commonly stores UVs as two unsigned 16-bit normalized
-    values (usage 5 / fmt 8, 4 bytes). Some resources use half2/float2, so keep
-    those as fallbacks.
-    """
+def _read_uv(buf, base, el, uv_scale: float, scheme: str):
     off = base + el.offset
     try:
+        if scheme == "legacy":
+            if el.size >= 8:
+                u, v = struct.unpack_from("<2f", buf, off)
+                return (float(u), float(v))
+            if el.fmt in (4, 8, 9) and el.size == 4:
+                u, v = struct.unpack_from("<HH", buf, off)
+                return (u / 65535.0, v / 65535.0)
+            u = _read_half(buf, off)
+            v = _read_half(buf, off + 2)
+            if u != u or v != v:
+                raise ValueError
+            return (float(u), float(v))
+
+        # Real TS4 object meshes: UVs are usually Short2 * UVScales.
+        if el.fmt == S4_FMT_SHORT2 and el.size >= 4:
+            u, v = struct.unpack_from("<2h", buf, off)
+            return (u * uv_scale, v * uv_scale)
+        if el.fmt == S4_FMT_SHORT2N and el.size >= 4:
+            u, v = struct.unpack_from("<2h", buf, off)
+            return (u / 32767.0, v / 32767.0)
+        if el.fmt == S4_FMT_USHORT2N and el.size >= 4:
+            u, v = struct.unpack_from("<2H", buf, off)
+            return (u / 65535.0, v / 65535.0)
+        if el.fmt == S4_FMT_FLOAT2 and el.size >= 8:
+            u, v = struct.unpack_from("<2f", buf, off)
+            return (float(u), float(v))
+        if el.fmt == S4_FMT_FLOAT16_2 and el.size >= 4:
+            u = _read_half(buf, off)
+            v = _read_half(buf, off + 2)
+            return (float(u), float(v))
+
+        # Best-effort fallback.
         if el.size >= 8:
             u, v = struct.unpack_from("<2f", buf, off)
             return (float(u), float(v))
-
-        # Observed object format: UShort2 normalized.
-        if el.fmt in (4, 8, 9) and el.size == 4:
-            u, v = struct.unpack_from("<HH", buf, off)
-            return (u / 65535.0, v / 65535.0)
-
-        # CAS/other fallback: half2.
-        u = _read_half(buf, off)
-        v = _read_half(buf, off + 2)
-        if u != u or v != v:  # nan
-            raise ValueError
-        return (float(u), float(v))
+        if el.size >= 4:
+            u, v = struct.unpack_from("<2h", buf, off)
+            return (u * uv_scale, v * uv_scale)
+        return (0.0, 0.0)
     except Exception:
         return (0.0, 0.0)
+
+
+def _compute_vertex_normals(positions, faces):
+    if not positions:
+        return []
+    acc = [[0.0, 0.0, 0.0] for _ in positions]
+    for a, b, c in faces:
+        try:
+            ax, ay, az = positions[a]
+            bx, by, bz = positions[b]
+            cx, cy, cz = positions[c]
+        except Exception:
+            continue
+        ux, uy, uz = bx - ax, by - ay, bz - az
+        vx, vy, vz = cx - ax, cy - ay, cz - az
+        nx = uy * vz - uz * vy
+        ny = uz * vx - ux * vz
+        nz = ux * vy - uy * vx
+        for i in (a, b, c):
+            acc[i][0] += nx
+            acc[i][1] += ny
+            acc[i][2] += nz
+    out = []
+    for nx, ny, nz in acc:
+        l = math.sqrt(nx * nx + ny * ny + nz * nz)
+        if l > 1e-12:
+            out.append((nx / l, ny / l, nz / l))
+        else:
+            out.append((0.0, 0.0, 1.0))
+    return out
 
 
 def _decode_ibuf(ibuf: bytes, count_indices: int, start_index: int):
@@ -224,10 +366,7 @@ def _decode_ibuf(ibuf: bytes, count_indices: int, start_index: int):
     if ibuf[0:4] != b"IBUF":
         raise ValueError("not IBUF")
     version = struct.unpack_from("<I", ibuf, 4)[0]
-    # header: sig(4)+ver(4)+flags(4)+displayListUsage(4) for v2; v1 = 12 bytes
     header = 16 if version >= 2 else 12
-    # First decode ALL indices (delta), then slice the group's range, because
-    # delta accumulator runs across the whole buffer.
     total = (len(ibuf) - header) // 2
     raw = struct.unpack_from(f"<{total}h", ibuf, header)
     decoded = []
@@ -236,6 +375,231 @@ def _decode_ibuf(ibuf: bytes, count_indices: int, start_index: int):
         acc += d
         decoded.append(acc)
     return decoded[start_index:start_index + count_indices]
+
+
+def _resolve_index(rcol: RCOL, ref: int, sig: bytes, fallback_search: bool = True):
+    primary = ref & 0x0FFFFFFF
+    n = len(rcol.internal_chunks)
+    for idx in (primary, primary + 1, primary - 1):
+        if 0 <= idx < n and rcol.chunk_sig(idx) == sig:
+            return idx
+    if fallback_search:
+        found = rcol.find_chunks_by_sig(sig)
+        if found:
+            found.sort(key=lambda i: len(rcol.chunk_bytes(i)), reverse=True)
+            return found[0]
+    raise ValueError(f"cannot resolve {sig!r}")
+
+
+def _resolve(rcol, *refs_and_sig, fallback_search: bool = True):
+    """Resolve an RCOL chunk reference and verify its signature."""
+    *refs, sig = refs_and_sig
+    for ref in refs:
+        try:
+            idx = _resolve_index(rcol, ref, sig, fallback_search=fallback_search)
+            return rcol.chunk_bytes(idx)
+        except Exception:
+            pass
+    raise ValueError(f"cannot resolve {sig!r}")
+
+
+def _parse_mtst_default_matd_ref(mtst: bytes) -> int | None:
+    if mtst[:4] != b"MTST" or len(mtst) < 20:
+        return None
+    version = struct.unpack_from("<I", mtst, 4)[0]
+    pos = 16  # tag+ver+nameHash+index
+    count = struct.unpack_from("<I", mtst, pos)[0]
+    pos += 4
+    choice = None
+    if version < 768:
+        for _ in range(count):
+            matd_ref, state = struct.unpack_from("<II", mtst, pos)
+            pos += 8
+            if state == 0:
+                return matd_ref
+            if choice is None:
+                choice = matd_ref
+    else:
+        for _ in range(count):
+            matd_ref, state, variant = struct.unpack_from("<III", mtst, pos)
+            pos += 12
+            if state == 0 and variant == 0:
+                return matd_ref
+            if state == 0 and choice is None:
+                choice = matd_ref
+            elif choice is None:
+                choice = matd_ref
+    return choice
+
+
+def _parse_matd_uv_scale(matd: bytes) -> float | None:
+    """Read FieldType.UVScales (0x420520E9) from a MATD, if present."""
+    if matd[:4] != b"MATD" or len(matd) < 44:
+        return None
+    version = struct.unpack_from("<I", matd, 4)[0]
+    if version >= 0x103:
+        mtrl_start = 28
+        pos = 40  # count field inside MTRL, after tag/u32/u16/u16
+    else:
+        mtrl_start = 20
+        pos = 32
+    count = struct.unpack_from("<I", matd, pos)[0]
+    pos += 4
+    for _ in range(count):
+        field, dtype, dwords, offset = struct.unpack_from("<4I", matd, pos)
+        pos += 16
+        if field != 0x420520E9 or dtype != 1 or dwords < 2:
+            continue
+        raw = matd[mtrl_start + offset:mtrl_start + offset + dwords * 4]
+        if len(raw) < dwords * 4:
+            continue
+        vals = struct.unpack("<" + "f" * dwords, raw)
+        for v in vals[:3]:
+            if isinstance(v, float) and abs(v) > 1e-12:
+                return float(v)
+    return None
+
+
+def _parse_matd_variant(matd: bytes, variant_id: int = 0) -> MaterialVariant:
+    mv = MaterialVariant(variant_id=variant_id)
+    if matd[:4] != b"MATD" or len(matd) < 44:
+        return mv
+
+    version = struct.unpack_from("<I", matd, 4)[0]
+    mv.shader = struct.unpack_from("<I", matd, 12)[0]
+    if version >= 0x103:
+        mtrl_start = 28
+        pos = 40
+    else:
+        mtrl_start = 20
+        pos = 32
+    count = struct.unpack_from("<I", matd, pos)[0]
+    pos += 4
+
+    for _ in range(count):
+        field, dtype, dwords, offset = struct.unpack_from("<4I", matd, pos)
+        pos += 16
+        raw = matd[mtrl_start + offset:mtrl_start + offset + dwords * 4]
+        if len(raw) < dwords * 4:
+            continue
+
+        if field == 0x420520E9 and dtype == 1 and dwords >= 2:
+            vals = struct.unpack("<" + "f" * dwords, raw)
+            for v in vals[:3]:
+                if abs(v) > 1e-12:
+                    mv.uv_scale = float(v)
+                    break
+        elif dtype in (4, 0x10004) and dwords >= 4:
+            inst = struct.unpack_from("<Q", raw, 0)[0]
+            tid = struct.unpack_from("<I", raw, 8)[0]
+            gid = struct.unpack_from("<I", raw, 12)[0]
+            key = (tid, gid, inst)
+            if field == 0x6CC0FD85:
+                mv.diffuse_key = key
+            elif field == 0x6E56548A:
+                mv.normal_key = key
+            elif field == 0xAD528A60:
+                mv.specular_key = key
+            elif field == 0xF303D152:
+                mv.emission_key = key
+
+    return mv
+
+
+def _resolve_default_matd_bytes(rcol: RCOL, mat_ref: int) -> bytes | None:
+    try:
+        sig = None
+        idx = None
+        # Prefer MTST over a nearby scale-offset MATD. Some object groups place
+        # a tiny helper MATD right next to the real MTST reference.
+        for cand_sig in (b"MTST", b"MATD"):
+            try:
+                idx = _resolve_index(rcol, mat_ref, cand_sig, fallback_search=False)
+                sig = cand_sig
+                break
+            except Exception:
+                pass
+        if idx is None:
+            return None
+        block = rcol.chunk_bytes(idx)
+        if sig == b"MATD":
+            return block
+        mtst_ref = _parse_mtst_default_matd_ref(block)
+        if mtst_ref is None:
+            return None
+        matd_idx = _resolve_index(rcol, mtst_ref, b"MATD", fallback_search=False)
+        return rcol.chunk_bytes(matd_idx)
+    except Exception:
+        return None
+
+
+def _material_shader(rcol: RCOL, mat_ref: int) -> int | None:
+    matd = _resolve_default_matd_bytes(rcol, mat_ref)
+    if not matd or len(matd) < 16 or matd[:4] != b"MATD":
+        return None
+    return struct.unpack_from("<I", matd, 12)[0]
+
+
+def _material_uv_scale(rcol: RCOL, mat_ref: int) -> float:
+    # Default used by Sims4Tools when UVScales is absent.
+    default = 1.0 / 32767.0
+    try:
+        matd = _resolve_default_matd_bytes(rcol, mat_ref)
+        if not matd:
+            return default
+        scale = _parse_matd_uv_scale(matd)
+        return scale if scale else default
+    except Exception:
+        return default
+
+
+def material_variants(rcol: RCOL, mat_ref: int) -> list[MaterialVariant]:
+    """Return the default-state material variants for a mesh material reference.
+
+    For MTST this yields one entry per visible swatch/variant in file order.
+    For direct MATD references it yields a single variant.
+    """
+    try:
+        idx = None
+        sig = None
+        # Prefer MTST over a nearby scale-offset MATD helper.
+        for cand_sig in (b"MTST", b"MATD"):
+            try:
+                idx = _resolve_index(rcol, mat_ref, cand_sig, fallback_search=False)
+                sig = cand_sig
+                break
+            except Exception:
+                pass
+        if idx is None:
+            return []
+        block = rcol.chunk_bytes(idx)
+        if sig == b"MATD":
+            return [_parse_matd_variant(block, variant_id=0)]
+
+        version = struct.unpack_from("<I", block, 4)[0]
+        pos = 16
+        count = struct.unpack_from("<I", block, pos)[0]
+        pos += 4
+        out = []
+        for _ in range(count):
+            if version < 768:
+                matd_ref, state = struct.unpack_from("<II", block, pos)
+                variant_id = 0
+                pos += 8
+            else:
+                matd_ref, state, variant_id = struct.unpack_from("<III", block, pos)
+                pos += 12
+            # state 0 = default, non-burnt visual material
+            if state != 0:
+                continue
+            try:
+                matd_idx = _resolve_index(rcol, matd_ref, b"MATD", fallback_search=False)
+            except Exception:
+                continue
+            out.append(_parse_matd_variant(rcol.chunk_bytes(matd_idx), variant_id=variant_id))
+        return out
+    except Exception:
+        return []
 
 
 def parse_object_mesh(rcol: RCOL, name: str = "object") -> list:
@@ -271,9 +635,16 @@ def parse_object_mesh(rcol: RCOL, name: str = "object") -> list:
             primitive_count = struct.unpack_from("<I", mlod, p)[0]; p += 4
             bbox = struct.unpack_from("<6f", mlod, p); p += 24
 
+            shader = _material_shader(rcol, mat_ref)
+            # Skip helper-only shadow meshes. These are not part of the visible
+            # furniture model the user expects to export.
+            if shader in (0xC09C7582, 0x21FE207D):  # DropShadow / ShadowMap
+                pos = next_group
+                continue
+
             mesh = _build_group_mesh(
                 rcol, f"{name}_g{g:02d}",
-                vrtf_ref, vbuf_ref, ibuf_ref,
+                mat_ref, vrtf_ref, vbuf_ref, ibuf_ref,
                 start_vertex, vertex_count,
                 start_index, primitive_count, stream_offset)
             mesh.bbox_min = (bbox[0], bbox[1], bbox[2])
@@ -287,64 +658,37 @@ def parse_object_mesh(rcol: RCOL, name: str = "object") -> list:
     return meshes
 
 
-def _resolve(rcol, *refs_and_sig):
-    """Resolve an RCOL chunk reference and verify its signature.
-
-    Real Sims 4 references are ``ref & 0x0FFFFFFF`` used as a 0-based index into
-    the internal chunk list (the high nibble is a reference-type flag). We try
-    that first, then a couple of alternative encodings, and finally fall back to
-    a signature search.
-    """
-    *refs, sig = refs_and_sig
-    primary = refs[0] & 0x0FFFFFFF
-    n = len(rcol.internal_chunks)
-
-    # The reference's base index can be shifted by ±1 depending on whether a
-    # leading MODL chunk is present in this resource. Try the masked index and
-    # its near neighbours, accepting only a matching signature.
-    for idx in (primary, primary + 1, primary - 1):
-        if 0 <= idx < n and rcol.chunk_sig(idx) == sig:
-            return rcol.chunk_bytes(idx)
-
-    # Other supplied refs (same neighbour search).
-    for ref in refs[1:]:
-        base = ref & 0x0FFFFFFF
-        for idx in (base, base + 1, base - 1):
-            if 0 <= idx < n and rcol.chunk_sig(idx) == sig:
-                return rcol.chunk_bytes(idx)
-
-    # Fallback: pick the LARGEST chunk with this signature (the real mesh
-    # buffer rather than a tiny dropshadow buffer).
-    found = rcol.find_chunks_by_sig(sig)
-    if found:
-        found.sort(key=lambda i: len(rcol.chunk_bytes(i)), reverse=True)
-        return rcol.chunk_bytes(found[0])
-    raise ValueError(f"cannot resolve {sig!r}")
-
-
-def _build_group_mesh(rcol, name, vrtf_ref, vbuf_ref, ibuf_ref,
+def _build_group_mesh(rcol, name, mat_ref, vrtf_ref, vbuf_ref, ibuf_ref,
                       start_vertex, vertex_count, start_index, primitive_count,
                       stream_offset) -> ObjMesh:
-    # Resolve by signature: real files offset the refs, so we try the three
-    # neighbouring refs and verify against the expected chunk signature.
     vrtf_b = _resolve(rcol, vrtf_ref, vbuf_ref, ibuf_ref, b"VRTF")
     vbuf_b = _resolve(rcol, vbuf_ref, ibuf_ref, vrtf_ref, b"VBUF")
     ibuf_b = _resolve(rcol, ibuf_ref, vbuf_ref, vrtf_ref, b"IBUF")
 
     vrtf = parse_vrtf(vrtf_b)
-    mesh = ObjMesh(name=name)
+    scheme = _vrtf_scheme(vrtf)
+    uv_scale = _material_uv_scale(rcol, mat_ref) if scheme == "s4" else 1.0
+    mesh = ObjMesh(name=name, material_ref=mat_ref)
 
     stride = vrtf.stride
     vbuf_data = 16  # sig+ver+flags+swizzle
 
     pos_el = norm_el = uv_el = None
     for el in vrtf.elements:
-        if el.usage == USAGE_POSITION and pos_el is None:
-            pos_el = el
-        elif el.usage == USAGE_UV and uv_el is None:
-            uv_el = el
-        elif el.usage == USAGE_NORMAL and norm_el is None:
-            norm_el = el
+        if scheme == "s4":
+            if el.usage == S4_USAGE_POSITION and pos_el is None:
+                pos_el = el
+            elif el.usage == S4_USAGE_NORMAL and norm_el is None:
+                norm_el = el
+            elif el.usage == S4_USAGE_UV and el.usage_index == 0 and uv_el is None:
+                uv_el = el
+        else:
+            if el.usage == LEGACY_USAGE_POSITION and pos_el is None:
+                pos_el = el
+            elif el.usage == LEGACY_USAGE_NORMAL and norm_el is None:
+                norm_el = el
+            elif el.usage == LEGACY_USAGE_UV and uv_el is None:
+                uv_el = el
 
     base0 = vbuf_data + stream_offset + start_vertex * stride
     for vi in range(vertex_count):
@@ -352,11 +696,11 @@ def _build_group_mesh(rcol, name, vrtf_ref, vbuf_ref, ibuf_ref,
         if base + stride > len(vbuf_b):
             break
         if pos_el is not None:
-            mesh.positions.append(_read_position(vbuf_b, base, pos_el))
+            mesh.positions.append(_read_position(vbuf_b, base, pos_el, scheme))
         else:
             mesh.positions.append((0.0, 0.0, 0.0))
         if uv_el is not None:
-            mesh.uvs.append(_read_uv(vbuf_b, base, uv_el))
+            mesh.uvs.append(_read_uv(vbuf_b, base, uv_el, uv_scale, scheme))
 
     num_indices = primitive_count * 3
     indices = _decode_ibuf(ibuf_b, num_indices, start_index)
@@ -367,8 +711,11 @@ def _build_group_mesh(rcol, name, vrtf_ref, vbuf_ref, ibuf_ref,
         if 0 <= a < vc and 0 <= b < vc and 0 <= c < vc:
             mesh.faces.append((a, b, c))
 
-    # drop UVs if they came out all-zero/nan (keeps OBJ/FBX clean)
     if mesh.uvs and all(u == (0.0, 0.0) for u in mesh.uvs):
         mesh.uvs = []
+
+    # If we failed to decode explicit normals, compute smooth vertex normals.
+    if not mesh.normals or len(mesh.normals) != len(mesh.positions):
+        mesh.normals = _compute_vertex_normals(mesh.positions, mesh.faces)
 
     return mesh
