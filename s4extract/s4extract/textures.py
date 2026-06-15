@@ -67,28 +67,87 @@ def _looks_like_dds(data: bytes) -> bool:
 def unpack_rle_to_dds(data: bytes) -> bytes | None:
     """Best-effort unpack of S4 RLE2/RLES container into a standard DDS blob."""
     if _looks_like_dds(data):
-        return _fix_dst_fourcc(data)
+        return _unshuffle_dst_to_dxt(data)
     idx = data.find(DDS_MAGIC)
     if 0 < idx < 64:
-        return _fix_dst_fourcc(data[idx:])
+        return _unshuffle_dst_to_dxt(data[idx:])
     return None
 
 
-# Sims 4 uses custom FourCCs DST1/DST3/DST5 which are byte-compatible with the
-# standard DXT1/DXT3/DXT5 block formats — only the FourCC tag differs. We patch
-# the tag so the standard DDS decoder (Pillow) accepts them.
-_DST_MAP = {b"DST1": b"DXT1", b"DST3": b"DXT3", b"DST5": b"DXT5"}
+# Sims 4 _IMG resources often use custom FourCCs DST1/DST5. They are *not*
+# just DXT1/DXT5 with a different tag: the compressed block stream is
+# "shuffled" by component (S4PI calls this DST). A normal DDS decoder will show
+# a partly-correct image followed by colourful garbage/noise unless we
+# unshuffle the stream first. The logic below is a Python port of the S4PI /
+# Sims4Toolkit DstResource unshuffle routine.
+_DST_TO_DXT = {b"DST1": b"DXT1", b"DST3": b"DXT3", b"DST5": b"DXT5"}
 
 
-def _fix_dst_fourcc(data: bytes) -> bytes:
-    if len(data) < 88:
+def _unshuffle_dst_to_dxt(data: bytes) -> bytes:
+    """Convert Sims 4 DST1/DST5 DDS data into standard DXT1/DXT5 DDS data."""
+    if len(data) < 128:
         return data
+
     fourcc = data[84:88]
-    if fourcc in _DST_MAP:
-        data = bytearray(data)
-        data[84:88] = _DST_MAP[fourcc]
-        return bytes(data)
-    return data
+    if fourcc not in _DST_TO_DXT:
+        return data
+
+    # DST3 exists in headers but is uncommon and not supported by the original
+    # S4TK implementation either. Tagging it as DXT3 would produce broken output,
+    # so leave it untouched and let the decoder/report handle it.
+    if fourcc == b"DST3":
+        return data
+
+    header = bytearray(data[:128])
+    header[84:88] = _DST_TO_DXT[fourcc]
+    src = data[128:]
+    size = len(src)
+    out = bytearray()
+
+    if fourcc == b"DST1":
+        # Shuffled layout: [all first 4 bytes of each 8-byte DXT1 block]
+        #                  [all last  4 bytes of each 8-byte DXT1 block]
+        half = size >> 1
+        count = half // 4
+        out = bytearray(size)
+        w = 0
+        o0, o1 = 0, half
+        for _ in range(count):
+            out[w:w + 4] = src[o0:o0 + 4]
+            out[w + 4:w + 8] = src[o1:o1 + 4]
+            w += 8
+            o0 += 4
+            o1 += 4
+        if w < size:
+            out[w:] = src[w:]
+
+    elif fourcc == b"DST5":
+        # Standard DXT5 block is 16 bytes:
+        #   alpha endpoints (2), alpha indices (6), color endpoints (4), color indices (4)
+        # Sims DST5 stores component planes in this order:
+        #   endpoints(2) for all blocks, color endpoints(4), alpha indices(6), color indices(4)
+        off0 = 0
+        off2 = off0 + (size >> 3)          # 2 bytes per 16-byte block
+        off1 = off2 + (size >> 2)          # 4 bytes per block
+        off3 = off1 + ((6 * size) >> 4)    # 6 bytes per block
+        count = (off2 - off0) // 2
+        out = bytearray(size)
+        w = 0
+        p0, p1, p2, p3 = off0, off1, off2, off3
+        for _ in range(count):
+            out[w:w + 2] = src[p0:p0 + 2]
+            out[w + 2:w + 8] = src[p1:p1 + 6]
+            out[w + 8:w + 12] = src[p2:p2 + 4]
+            out[w + 12:w + 16] = src[p3:p3 + 4]
+            w += 16
+            p0 += 2
+            p1 += 6
+            p2 += 4
+            p3 += 4
+        if w < size:
+            out[w:] = src[w:]
+
+    return bytes(header) + bytes(out)
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +300,17 @@ def dds_to_rgba_flat(data: bytes):
 def save_as_png(data: bytes, out_path: str) -> str:
     """Convert texture resource bytes to a PNG. Returns a status string."""
 
+    # Remember original Sims 4 FourCC so the log can prove that the fixed path
+    # was used. Without this, old and fixed builds both only said
+    # "decoded DDS -> PNG", which made it hard to notice stale local copies.
+    original_fourcc = None
+    if _looks_like_dds(data) and len(data) >= 88:
+        original_fourcc = data[84:88]
+    else:
+        idx0 = data.find(DDS_MAGIC)
+        if 0 < idx0 < 64 and len(data) >= idx0 + 88:
+            original_fourcc = data[idx0 + 84:idx0 + 88]
+
     if _looks_like_png(data):
         with open(out_path, "wb") as f:
             f.write(data)
@@ -280,6 +350,8 @@ def save_as_png(data: bytes, out_path: str) -> str:
         if img.mode not in ("RGB", "RGBA", "L"):
             img = img.convert("RGBA")
         img.save(out_path)
+        if original_fourcc in (b"DST1", b"DST5"):
+            return f"unshuffled {original_fourcc.decode('ascii')} -> decoded DDS ({img.mode}) -> PNG via Pillow"
         return f"decoded DDS ({img.mode}) -> PNG via Pillow"
     except Exception as pillow_err:
         pass
@@ -293,6 +365,8 @@ def save_as_png(data: bytes, out_path: str) -> str:
         else:
             img = Image.frombytes("RGBA", (w, h), bytes(flat))
             img.save(out_path)
+        if original_fourcc in (b"DST1", b"DST5"):
+            return f"unshuffled {original_fourcc.decode('ascii')} -> decoded DDS -> PNG (builtin)"
         return "decoded DDS -> PNG (builtin)"
     except Exception as e:
         dds_path = out_path.rsplit(".", 1)[0] + ".dds"

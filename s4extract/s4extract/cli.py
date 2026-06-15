@@ -11,7 +11,7 @@ Options:
     --no-png          do not extract textures to .png
     --no-unity        do not generate Unity .mat
     --raw             also dump every raw resource
-    --pipeline NAME   unity render pipeline (urp|builtin|hdrp), default urp
+    --pipeline NAME   unity render pipeline (builtin|urp|hdrp), default builtin
     -q, --quiet       less output
 """
 from __future__ import annotations
@@ -48,12 +48,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-png", action="store_true")
     ap.add_argument("--no-unity", action="store_true")
     ap.add_argument("--raw", action="store_true", help="also dump raw resources")
-    ap.add_argument("--pipeline", default="hdrp", choices=["urp", "builtin", "hdrp"],
-                    help="Unity render pipeline for .mat (default: hdrp)")
+    ap.add_argument("--pipeline", default="builtin", choices=["builtin", "urp", "hdrp"],
+                    help="Unity render pipeline for .mat (default: builtin)")
     ap.add_argument("--no-colliders", action="store_true",
                     help="do not generate convex collider meshes")
+    ap.add_argument("--prefab", action="store_true",
+                    help="generate legacy YAML .prefab files (normally not needed; Unity creates *_READY.prefab via Editor fixer)")
     ap.add_argument("--no-prefab", action="store_true",
-                    help="do not generate Unity .prefab")
+                    help="compatibility flag; legacy prefabs are off by default")
     ap.add_argument("--static", action="store_true",
                     help="make prefab static (no Rigidbody) instead of dynamic")
     ap.add_argument("--max-hulls", type=int, default=16,
@@ -88,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         unity_mat=not args.no_unity,
         mat_pipeline=args.pipeline,
         colliders=not args.no_colliders,
-        prefab=not args.no_prefab,
+        prefab=args.prefab and not args.no_prefab,
         dynamic=not args.static,
         max_hulls=args.max_hulls,
         all_lods=args.all_lods,

@@ -4,8 +4,10 @@ Reverse-engineered against real Sims 4 packages. Key real-world findings:
 
 * MLOD version 0x0205 group records are variable-length; we use ``subset_bytes``
   (the first DWORD of each group) to jump reliably to the next group.
-* VRTF uses D3DDECLUSAGE codes: 0=Position, 2=Normal, 3=UV (NOT the GEOM
-  numbering). Positions are commonly Half4 (use xyz).
+* VRTF uses D3DDECLUSAGE codes (D3D9): 0=Position, 3=Normal, 5=TexCoord.
+  Older builds accidentally treated usage 3 as UV, so object FBX files were
+  exported without UVs and Unity could only show flat material colors.
+  Positions are commonly Half4/Short4 (use xyz).
 * VBUF header = 16 bytes (sig+ver+flags+swizzleRef), then interleaved verts.
 * IBUF version 2 has a 16-byte header and stores **delta-encoded** 16-bit
   indices (each value is a signed delta added to a running accumulator).
@@ -18,14 +20,16 @@ import struct
 from dataclasses import dataclass, field
 
 
-# D3DDECLUSAGE codes used by VRTF
+# D3DDECLUSAGE codes used by VRTF (D3D9 declaration usage values)
 USAGE_POSITION = 0
 USAGE_BLENDWEIGHT = 1
-USAGE_BLENDINDICES = 2  # NOTE: some files use 2 for normal; we disambiguate
-USAGE_NORMAL = 2
-USAGE_UV = 3            # TEXCOORD
+USAGE_BLENDINDICES = 2
+USAGE_NORMAL = 3
+USAGE_PSIZE = 4
+USAGE_UV = 5            # TEXCOORD
 USAGE_TANGENT = 6
-USAGE_COLOR = 4
+USAGE_BINORMAL = 7
+USAGE_COLOR = 10
 
 # VRTF data format -> byte size. (Half-based formats are the common case in TS4.)
 # Sizes are derived from real files; when unknown we infer from element offsets.
@@ -188,13 +192,26 @@ def _read_position(buf, base, el):
 
 
 def _read_uv(buf, base, el):
-    """UV best-effort: try half2, else short2 normalized."""
+    """Decode a TEXCOORD element.
+
+    Sims 4 object VRTF commonly stores UVs as two unsigned 16-bit normalized
+    values (usage 5 / fmt 8, 4 bytes). Some resources use half2/float2, so keep
+    those as fallbacks.
+    """
+    off = base + el.offset
     try:
         if el.size >= 8:
-            u, v = struct.unpack_from("<2f", buf, base + el.offset)
+            u, v = struct.unpack_from("<2f", buf, off)
             return (float(u), float(v))
-        u = _read_half(buf, base + el.offset)
-        v = _read_half(buf, base + el.offset + 2)
+
+        # Observed object format: UShort2 normalized.
+        if el.fmt in (4, 8, 9) and el.size == 4:
+            u, v = struct.unpack_from("<HH", buf, off)
+            return (u / 65535.0, v / 65535.0)
+
+        # CAS/other fallback: half2.
+        u = _read_half(buf, off)
+        v = _read_half(buf, off + 2)
         if u != u or v != v:  # nan
             raise ValueError
         return (float(u), float(v))
@@ -326,7 +343,7 @@ def _build_group_mesh(rcol, name, vrtf_ref, vbuf_ref, ibuf_ref,
             pos_el = el
         elif el.usage == USAGE_UV and uv_el is None:
             uv_el = el
-        elif el.usage == 2 and norm_el is None:
+        elif el.usage == USAGE_NORMAL and norm_el is None:
             norm_el = el
 
     base0 = vbuf_data + stream_offset + start_vertex * stride

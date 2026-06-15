@@ -48,7 +48,7 @@ class App(tk.Tk):
         self.v_png = tk.BooleanVar(value=True)
         self.v_mat = tk.BooleanVar(value=True)
         self.v_col = tk.BooleanVar(value=True)
-        self.v_prefab = tk.BooleanVar(value=True)
+        self.v_prefab = tk.BooleanVar(value=False)
         self.v_dynamic = tk.BooleanVar(value=True)
         self.v_raw = tk.BooleanVar(value=False)
         for text, var in [("OBJ", self.v_obj), ("FBX", self.v_fbx),
@@ -62,8 +62,8 @@ class App(tk.Tk):
         pl = ttk.Frame(self, padding=(10, 0))
         pl.pack(fill="x")
         ttk.Label(pl, text="Render pipeline:").pack(side="left")
-        self.v_pipeline = tk.StringVar(value="hdrp")
-        for p in ("hdrp", "urp", "builtin"):
+        self.v_pipeline = tk.StringVar(value="builtin")
+        for p in ("builtin", "urp", "hdrp"):
             ttk.Radiobutton(pl, text=p.upper(), value=p,
                             variable=self.v_pipeline).pack(side="left", padx=4)
 

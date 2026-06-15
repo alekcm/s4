@@ -22,9 +22,9 @@ class Options:
     fbx: bool = True
     png: bool = True
     unity_mat: bool = True
-    mat_pipeline: str = "hdrp"     # hdrp | urp | builtin
+    mat_pipeline: str = "builtin"  # builtin | urp | hdrp
     colliders: bool = True         # generate compound convex colliders
-    prefab: bool = True            # generate a Unity prefab
+    prefab: bool = False           # generate legacy YAML prefab (Unity fixer creates READY prefab instead)
     dynamic: bool = True           # add Rigidbody (dynamic furniture)
     max_hulls: int = 16            # V-HACD: max convex parts per object
     all_lods: bool = False         # export every LOD (default: best only)
@@ -37,6 +37,39 @@ def _classify_texture_role(name: str) -> str:
     if "spec" in n or "_s_" in n or "mask" in n or "_rough" in n:
         return "specular"
     return "diffuse"
+
+
+def _is_opaque_square_palette_png(path: str) -> bool:
+    """Heuristic for Sims object swatches: large square opaque atlas textures.
+
+    Object packages usually contain many color variants as full-size square
+    DST1 atlases, plus masks/specular/thumbnail/parts textures with alpha or
+    non-square dimensions. The package format does not give friendly names, so
+    this mirrors Sims4Studio's practical swatch selection for exported object
+    textures.
+    """
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            w, h = im.size
+            if w != h or w < 256:
+                return False
+            rgba = im.convert("RGBA")
+            amin, amax = rgba.getchannel("A").getextrema()
+            return amin == 255 and amax == 255
+    except Exception:
+        return False
+
+
+def _choose_palette_diffuses(png_files: list[str]) -> list[str]:
+    palettes = [p for p in png_files if os.path.exists(p) and _is_opaque_square_palette_png(p)]
+    if palettes:
+        return palettes
+    # Fallback for unusual packages or missing Pillow: keep previous behaviour.
+    for p in png_files:
+        if os.path.exists(p):
+            return [p]
+    return []
 
 
 def _to_common_mesh(m):
@@ -159,10 +192,18 @@ def extract_package(package_path: str, opt: Options) -> dict:
             except Exception as ex:
                 report["errors"].append(f"TEX {e.tgi}: {ex}")
 
-    # ---- Unity material (pipeline-aware) ----
-    material_guid = None
+    # ---- Unity materials (pipeline-aware), one material per color swatch ----
+    material_guid = None          # default material used by FBX/prefab remap
+    material_guids = []
     if opt.unity_mat and png_files:
-        diffuse = normal = specular = None
+        for p in png_files:
+            if os.path.exists(p):
+                unity.write_texture_meta(p)
+
+        # Pick common auxiliary maps by name if a creator used descriptive names.
+        # Most EA/CC object packages only expose anonymous _IMG resources, so this
+        # will often stay None, which is fine for a plain albedo material.
+        normal = specular = None
         for p in png_files:
             if not os.path.exists(p):
                 continue
@@ -171,27 +212,68 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 normal = p
             elif role == "specular" and specular is None:
                 specular = p
-            elif diffuse is None:
-                diffuse = p
-        if diffuse is None and png_files:
-            diffuse = png_files[0]
 
-        for p in png_files:
-            if os.path.exists(p):
-                unity.write_texture_meta(p)
+        # Sims object swatches are usually multiple full-size square opaque
+        # diffuse atlases. Generate a separate Unity .mat for every swatch.
+        palette_diffuses = _choose_palette_diffuses(png_files)
 
-        mat_name = f"{base}_material"
-        mat_path = os.path.join(out_root, mat_name + ".mat")
-        unity.write_material(
-            mat_path, mat_name, pipeline=opt.mat_pipeline,
-            diffuse_png=diffuse, normal_png=normal, specular_png=specular)
-        material_guid = unity._guid_for(os.path.basename(mat_path))
-        report["materials"].append({
-            "name": mat_name, "pipeline": opt.mat_pipeline,
-            "file": os.path.basename(mat_path),
-            "diffuse": os.path.basename(diffuse) if diffuse else None,
-            "normal": os.path.basename(normal) if normal else None,
-            "specular": os.path.basename(specular) if specular else None})
+        # Anonymous EA/CC object _IMG order is commonly:
+        #   tex00 = swatch diffuse, tex01 = normal, tex02 = mask/specular,
+        #   tex03.. = more swatch diffuses.
+        # Since DBPF does not provide friendly texture names, use that order as
+        # a fallback after we have detected the diffuse swatches.
+        if (normal is None or specular is None) and palette_diffuses:
+            palette_set = set(palette_diffuses)
+            aux = [p for p in png_files if os.path.exists(p) and p not in palette_set]
+            if normal is None and aux:
+                normal = aux[0]
+            if specular is None and len(aux) > 1:
+                specular = aux[1]
+
+        material_texture_pairs = []
+        for mi, diffuse in enumerate(palette_diffuses):
+            suffix = f"swatch{mi:02d}"
+            mat_name = f"{base}_{suffix}_material"
+            mat_path = os.path.join(out_root, mat_name + ".mat")
+            unity.write_material(
+                mat_path, mat_name, pipeline=opt.mat_pipeline,
+                diffuse_png=diffuse, normal_png=normal, specular_png=specular)
+            guid = unity._guid_for(os.path.basename(mat_path))
+            material_guids.append(guid)
+            material_texture_pairs.append((
+                mat_name,
+                os.path.basename(diffuse) if diffuse else "",
+                os.path.basename(normal) if normal else None,
+                os.path.basename(specular) if specular else None))
+            if material_guid is None:
+                material_guid = guid
+            report["materials"].append({
+                "name": mat_name,
+                "pipeline": opt.mat_pipeline,
+                "swatch": mi,
+                "file": os.path.basename(mat_path),
+                "diffuse": os.path.basename(diffuse) if diffuse else None,
+                "normal": os.path.basename(normal) if normal else None,
+                "specular": os.path.basename(specular) if specular else None})
+
+        if material_texture_pairs:
+            fixer = unity.write_editor_material_fixer(
+                out_root, opt.mat_pipeline, material_texture_pairs,
+                mesh_names=[rec["name"] for rec in mesh_records])
+            report["materials"].append({
+                "name": "S4ExtractMaterialFixer",
+                "pipeline": opt.mat_pipeline,
+                "file": os.path.relpath(fixer, out_root).replace(os.sep, "/"),
+                "diffuse": None,
+                "normal": None,
+                "specular": None})
+
+    # Write FBX importer .meta even when we do not generate legacy prefabs.
+    # This prevents Unity's default FBX 0.01 file-scale behaviour and remaps the
+    # first material slot to the first generated swatch material.
+    for rec in mesh_records:
+        if rec.get("fbx"):
+            unity.write_fbx_meta(rec["fbx"], material_guid)
 
     # ---- colliders + prefab per mesh ----
     if (opt.colliders or opt.prefab):
