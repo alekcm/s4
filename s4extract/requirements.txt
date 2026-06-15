@@ -1,0 +1,8 @@
+# Core extraction (DBPF parsing, meshes, FBX, prefab) works on pure stdlib.
+# These add textures and high-quality colliders:
+Pillow>=9.0      # texture decode/save (PNG)
+numpy>=1.20      # DXT decoding + mesh math
+trimesh>=4.0     # V-HACD convex decomposition (compound colliders)
+vhacdx>=0.0.8    # V-HACD backend used by trimesh.convex_decomposition
+scipy>=1.7       # convex hull fallback collider
+# Tkinter (GUI) ships with the standard CPython installer on Windows.
