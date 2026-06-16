@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import math
 from collections import deque
 from dataclasses import dataclass
 
@@ -19,18 +20,18 @@ from . import colliders as col
 @dataclass
 class Options:
     out_dir: str
-    raw: bool = False        # also dump every raw resource
+    raw: bool = False
     obj: bool = True
     fbx: bool = True
     png: bool = True
     unity_mat: bool = True
-    mat_pipeline: str = "builtin"  # builtin | urp | hdrp
-    colliders: bool = True         # generate compound convex colliders
-    prefab: bool = False           # generate legacy YAML prefab (Unity fixer creates READY prefab instead)
-    dynamic: bool = True           # add Rigidbody (dynamic furniture)
-    max_hulls: int = 16            # V-HACD: max convex parts per object
-    all_lods: bool = False         # export every LOD (default: best only)
-    parts_prefab: bool = True      # also generate a split-into-parts prefab via Unity fixer
+    mat_pipeline: str = "builtin"
+    colliders: bool = True
+    prefab: bool = False
+    dynamic: bool = True
+    max_hulls: int = 16
+    all_lods: bool = False
+    parts_prefab: bool = True
 
 
 def _classify_texture_role(name: str) -> str:
@@ -43,14 +44,6 @@ def _classify_texture_role(name: str) -> str:
 
 
 def _is_opaque_square_palette_png(path: str) -> bool:
-    """Heuristic for Sims object swatches: large square opaque atlas textures.
-
-    Object packages usually contain many color variants as full-size square
-    DST1 atlases, plus masks/specular/thumbnail/parts textures with alpha or
-    non-square dimensions. The package format does not give friendly names, so
-    this mirrors Sims4Studio's practical swatch selection for exported object
-    textures.
-    """
     try:
         from PIL import Image
         with Image.open(path) as im:
@@ -68,7 +61,6 @@ def _choose_palette_diffuses(png_files: list[str]) -> list[str]:
     palettes = [p for p in png_files if os.path.exists(p) and _is_opaque_square_palette_png(p)]
     if palettes:
         return palettes
-    # Fallback for unusual packages or missing Pillow: keep previous behaviour.
     for p in png_files:
         if os.path.exists(p):
             return [p]
@@ -76,7 +68,6 @@ def _choose_palette_diffuses(png_files: list[str]) -> list[str]:
 
 
 def _to_common_mesh(m, rcol_obj=None):
-    """Normalize GeomMesh / ObjMesh to a common dict."""
     return {
         "positions": m.positions,
         "normals": m.normals,
@@ -110,15 +101,48 @@ def _mesh_from_face_ids(mesh_name: str, positions, normals, uvs, faces, face_ids
     )
 
 
-def _split_connected_components(mesh_name: str, positions, normals, uvs, faces):
-    """Split a mesh into disconnected vertex-connected islands.
+def _compute_component_bbox(positions, faces, face_ids):
+    used_verts = set()
+    for fi in face_ids:
+        for vi in faces[fi]:
+            used_verts.add(vi)
+    if not used_verts:
+        return None
+    xs = [positions[v][0] for v in used_verts]
+    ys = [positions[v][1] for v in used_verts]
+    zs = [positions[v][2] for v in used_verts]
+    return (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
 
-    We split *after* the original Sims mesh groups, so this gives the most
-    granular safe decomposition we can derive without semantic guessing.
+
+def _compute_component_centroid(positions, faces, face_ids):
+    used_verts = set()
+    for fi in face_ids:
+        for vi in faces[fi]:
+            used_verts.add(vi)
+    if not used_verts:
+        return (0, 0, 0)
+    cx = sum(positions[v][0] for v in used_verts) / len(used_verts)
+    cy = sum(positions[v][1] for v in used_verts) / len(used_verts)
+    cz = sum(positions[v][2] for v in used_verts) / len(used_verts)
+    return (cx, cy, cz)
+
+
+def _group_group_group_parts_semantically(mesh_name: str, positions, normals, uvs, faces, min_faces_per_part=10):
+    """
+    Group connected components into semantic parts based on spatial proximity
+    and geometric heuristics.
+    
+    Strategy:
+    1. Split into connected components (vertex-connected islands)
+    2. Filter out tiny components (< min_faces_per_part faces) - merge into nearest larger component
+    3. Cluster remaining components by spatial proximity with strong Y-weight
+    4. Detect "objects on top" via vertical gaps and separate them
+    4. Filter out debris parts that are too small to be meaningful removable parts
     """
     if not positions or not faces:
         return []
 
+    # Step 1: Get connected components with metadata
     vert_to_faces = [[] for _ in range(len(positions))]
     for fi, (a, b, c) in enumerate(faces):
         if 0 <= a < len(positions):
@@ -129,7 +153,7 @@ def _split_connected_components(mesh_name: str, positions, normals, uvs, faces):
             vert_to_faces[c].append(fi)
 
     seen = [False] * len(faces)
-    groups = []
+    components = []
     for start_fi in range(len(faces)):
         if seen[start_fi]:
             continue
@@ -147,13 +171,189 @@ def _split_connected_components(mesh_name: str, positions, normals, uvs, faces):
                     if not seen[nfi]:
                         seen[nfi] = True
                         q.append(nfi)
-        groups.append(comp_faces)
+        if comp_faces:
+            bbox = _compute_component_bbox(positions, faces, comp_faces)
+            centroid = _compute_component_centroid(positions, faces, comp_faces)
+            # Also compute Y-range for vertical gap detection
+            ys = [positions[v][1] for fi in comp_faces for v in faces[fi] if 0 <= v < len(positions)]
+            min_y = min(ys) if ys else 0
+            max_y = max(ys) if ys else 0
+            components.append({
+                'face_ids': comp_faces,
+                'face_count': len(comp_faces),
+                'bbox': bbox,
+                'centroid': centroid,
+                'min_y': min_y,
+                'max_y': max_y,
+            })
 
+    if not components:
+        return []
+
+    # Step 2: Separate large and tiny components
+    # Increase threshold: parts with < 20 faces are likely debris/decorations
+    DEBRIS_THRESHOLD = max(min_faces_per_part, 20)
+    large_comps = [c for c in components if c['face_count'] >= DEBRIS_THRESHOLD]
+    tiny_comps = [c for c in components if c['face_count'] < DEBRIS_THRESHOLD]
+
+    # If no large components, fall back to connected components (but merged)
+    if not large_comps:
+        all_faces = []
+        for c in components:
+            all_faces.extend(c['face_ids'])
+        return [_mesh_from_face_ids(f"{mesh_name}_part00", positions, normals, uvs, faces, all_faces)]
+
+    # Step 3: Merge tiny components into nearest large component
+    for tiny in tiny_comps:
+        tx, ty, tz = tiny['centroid']
+        best_idx = 0
+        best_dist = float('inf')
+        for i, large in enumerate(large_comps):
+            lx, ly, lz = large['centroid']
+            # Weight Y MORE for furniture (vertical separation = different objects)
+            dist = math.sqrt((tx - lx)**2 + (ty - ly)**2 * 2.0 + (tz - lz)**2)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+        large_comps[best_idx]['face_ids'].extend(tiny['face_ids'])
+        large_comps[best_idx]['face_count'] += tiny['face_count']
+        # Update bbox
+        tb = tiny['bbox']
+        lb = large_comps[best_idx]['bbox']
+        if tb and lb:
+            large_comps[best_idx]['bbox'] = (
+                min(lb[0], tb[0]), min(lb[1], tb[1]), min(lb[2], tb[2]),
+                max(lb[3], tb[3]), max(lb[4], tb[4]), max(lb[5], tb[5])
+            )
+            # Update Y-range
+            large_comps[best_idx]['min_y'] = min(large_comps[best_idx]['min_y'], tiny['min_y'])
+            large_comps[best_idx]['max_y'] = max(large_comps[best_idx]['max_y'], tiny['max_y'])
+
+    # Step 4: Detect vertical gaps (objects on top of other objects)
+    # Sort by min_y (bottom to top)
+    large_comps.sort(key=lambda c: c['min_y'])
+    
+    # Check for significant Y-gaps between components
+    # If there's a gap > 5% of object height, they're likely separate objects stacked vertically
+    all_min_y = min(c['min_y'] for c in large_comps)
+    all_max_y = max(c['max_y'] for c in large_comps)
+    obj_height = all_max_y - all_min_y
+    vertical_gap_threshold = max(obj_height * 0.05, 0.05)  # 5% of height or 5cm
+    
+    # Split into vertical layers where gaps exist
+    vertical_layers = []
+    current_layer = [0]
+    for i in range(1, len(large_comps)):
+        prev_max_y = large_comps[i-1]['max_y']
+        curr_min_y = large_comps[i]['min_y']
+        gap = curr_min_y - prev_max_y
+        if gap > vertical_gap_threshold:
+            # Significant vertical gap - new layer
+            vertical_layers.append(current_layer)
+            current_layer = [i]
+        else:
+            current_layer.append(i)
+    vertical_layers.append(current_layer)
+    
+    # Step 5: Within each vertical layer, cluster horizontally
+    final_clusters = []
+    for layer in vertical_layers:
+        if len(layer) == 1:
+            final_clusters.append([layer[0]])
+            continue
+        
+        # Agglomerative clustering within this layer (XZ plane only)
+        layer_comps = [large_comps[i] for i in layer]
+        all_bboxes = [c['bbox'] for c in layer_comps]
+        obj_min_x = min(b[0] for b in all_bboxes)
+        obj_min_z = min(b[2] for b in all_bboxes)
+        obj_max_x = max(b[3] for b in all_bboxes)
+        obj_max_z = max(b[5] for b in all_bboxes)
+        obj_diag_xz = math.sqrt((obj_max_x - obj_min_x)**2 + (obj_max_z - obj_min_z)**2)
+        cluster_threshold = max(obj_diag_xz * 0.2, 0.15)  # 20% of XZ diagonal or 15cm
+        
+        clusters = [[i] for i in range(len(layer_comps))]
+        changed = True
+        while changed and len(clusters) > 1:
+            changed = False
+            best_merge = None
+            best_dist = cluster_threshold
+            for i in range(len(clusters)):
+                for j in range(i + 1, len(clusters)):
+                    # Distance in XZ plane only (ignore Y within layer)
+                    ci_centroids = [layer_comps[idx]['centroid'] for idx in clusters[i]]
+                    cj_centroids = [layer_comps[idx]['centroid'] for idx in clusters[j]]
+                    cx1 = sum(c[0] for c in ci_centroids) / len(ci_centroids)
+                    cz1 = sum(c[2] for c in ci_centroids) / len(ci_centroids)
+                    cx2 = sum(c[0] for c in cj_centroids) / len(cj_centroids)
+                    cz2 = sum(c[2] for c in cj_centroids) / len(cj_centroids)
+                    dist = math.sqrt((cx1 - cx2)**2 + (cz1 - cz2)**2)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_merge = (i, j)
+            if best_merge:
+                i, j = best_merge
+                clusters[i].extend(clusters[j])
+                clusters.pop(j)
+                changed = True
+        
+        # Map back to global indices
+        for cluster in clusters:
+            final_clusters.append([layer[idx] for idx in cluster])
+
+    # Step 6: Filter out clusters that are too small to be meaningful removable parts
+    # A removable part should have at least 50 faces (configurable)
+    MIN_REMOVABLE_FACES = 50
+    filtered_clusters = []
+    for cluster in final_clusters:
+        total_faces = sum(large_comps[idx]['face_count'] for idx in cluster)
+        if total_faces >= MIN_REMOVABLE_FACES:
+            filtered_clusters.append(cluster)
+        else:
+            # Too small - merge into nearest larger cluster
+            if filtered_clusters:
+                # Find nearest cluster centroid
+                cluster_centroid = (
+                    sum(large_comps[idx]['centroid'][0] for idx in cluster) / len(cluster),
+                    sum(large_comps[idx]['centroid'][1] for idx in cluster) / len(cluster),
+                    sum(large_comps[idx]['centroid'][2] for idx in cluster) / len(cluster)
+                )
+                best_idx = 0
+                best_dist = float('inf')
+                for fi, fcluster in enumerate(filtered_clusters):
+                    f_centroid = (
+                        sum(large_comps[idx]['centroid'][0] for idx in fcluster) / len(fcluster),
+                        sum(large_comps[idx]['centroid'][1] for idx in fcluster) / len(fcluster),
+                        sum(large_comps[idx]['centroid'][2] for idx in fcluster) / len(fcluster)
+                    )
+                    dist = math.sqrt(
+                        (cluster_centroid[0] - f_centroid[0])**2 +
+                        (cluster_centroid[1] - f_centroid[1])**2 * 2.0 +
+                        (cluster_centroid[2] - f_centroid[2])**2
+                    )
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_idx = fi
+                filtered_clusters[best_idx].extend(cluster)
+            else:
+                # No other clusters, keep it anyway
+                filtered_clusters.append(cluster)
+
+    # Step 7: Build final parts from clusters
     parts = []
-    for pi, face_ids in enumerate(groups):
+    for ci, cluster in enumerate(filtered_clusters):
+        all_face_ids = []
+        for comp_idx in cluster:
+            all_face_ids.extend(large_comps[comp_idx]['face_ids'])
         parts.append(_mesh_from_face_ids(
-            f"{mesh_name}_part{pi:02d}", positions, normals, uvs, faces, face_ids))
+            f"{mesh_name}_part{ci:02d}", positions, normals, uvs, faces, all_face_ids))
+
     return parts
+
+
+# Псевдоним для совместимости
+def _group_parts_semantically(mesh_name: str, positions, normals, uvs, faces, min_faces_per_part=10):
+    return _group_parts_semantically(mesh_name, positions, normals, uvs, faces, min_faces_per_part)
 
 
 def _pick_break_axis(positions):
@@ -163,13 +363,65 @@ def _pick_break_axis(positions):
     ex = max(xs) - min(xs)
     ey = max(ys) - min(ys)
     ez = max(zs) - min(zs)
-    # Prefer a horizontal split plane for breakage when possible; this makes
-    # mugs / lamps / beds more likely to break into left/right-ish chunks rather
-    # than top/bottom slices.
     horiz_axis = 0 if ex >= ez else 2
     horiz_extent = ex if ex >= ez else ez
     if horiz_extent >= ey * 0.45:
         return horiz_axis
+    ext = [ex, ey, ez]
+    return max(range(3), key=lambda i: ext[i])
+
+
+def _analyze_part_shape(positions):
+    xs = [p[0] for p in positions]
+    ys = [p[1] for p in positions]
+    zs = [p[2] for p in positions]
+    ex = max(xs) - min(xs)
+    ey = max(ys) - min(ys)
+    ez = max(zs) - min(zs)
+    min_y = min(ys)
+    max_y = max(ys)
+    center_y = (min_y + max_y) * 0.5
+
+    is_flat_horizontal = ey < ex * 0.3 and ey < ez * 0.3
+    is_tall_vertical = ey > ex * 2.0 and ey > ez * 2.0
+    is_leg_like = ey > ex * 1.5 and ey > ez * 1.5 and ex < 0.3 and ez < 0.3
+    is_base_low = center_y < ey * 0.4
+
+    return {
+        'extents': (ex, ey, ez),
+        'is_flat_horizontal': is_flat_horizontal,
+        'is_tall_vertical': is_tall_vertical,
+        'is_leg_like': is_leg_like,
+        'is_base_low': is_base_low,
+        'min_y': min_y,
+        'max_y': max_y,
+    }
+
+
+def _pick_semantic_break_axis(positions):
+    shape = _analyze_part_shape(positions)
+    ex, ey, ez = shape['extents']
+
+    if shape['is_flat_horizontal']:
+        return 0 if ex >= ez else 2
+
+    if shape['is_tall_vertical']:
+        return 0 if ex <= ez else 2
+
+    if shape['is_leg_like']:
+        return 0 if ex <= ez else 2
+
+    if shape['is_base_low']:
+        if ex >= ez and ex >= ey * 0.5:
+            return 0
+        elif ez >= ex and ez >= ey * 0.5:
+            return 2
+
+    horiz_axis = 0 if ex >= ez else 2
+    horiz_extent = ex if ex >= ez else ez
+    if horiz_extent >= ey * 0.45:
+        return horiz_axis
+
     ext = [ex, ey, ez]
     return max(range(3), key=lambda i: ext[i])
 
@@ -195,10 +447,18 @@ def _split_mesh_by_axis(mesh: GeomMesh, axis: int):
 
 
 def _fracture_mesh(mesh: GeomMesh):
-    """Create a coarse two-piece broken variant for a logical part."""
     if mesh.face_count < 6 or mesh.vertex_count < 6:
         return []
-    primary = _pick_break_axis(mesh.positions)
+
+    shape = _analyze_part_shape(mesh.positions)
+
+    if shape['is_leg_like'] and mesh.face_count < 50:
+        return []
+
+    if shape['is_base_low'] and mesh.face_count < 30:
+        return []
+
+    primary = _pick_semantic_break_axis(mesh.positions)
     axes = [primary] + [ax for ax in (0, 1, 2) if ax != primary]
     for axis in axes:
         halves = _split_mesh_by_axis(mesh, axis)
@@ -225,7 +485,6 @@ def extract_package(package_path: str, opt: Options) -> dict:
         "errors": [],
     }
 
-    # ---- raw dump ----
     if opt.raw:
         raw_dir = os.path.join(out_root, "raw")
         os.makedirs(raw_dir, exist_ok=True)
@@ -239,10 +498,8 @@ def extract_package(package_path: str, opt: Options) -> dict:
             except Exception as ex:
                 report["errors"].append(f"raw {e.tgi}: {ex}")
 
-    # ---- collect meshes from BOTH GEOM (CAS) and MODL/MLOD (furniture) ----
-    collected = []   # list of normalized mesh dicts
+    collected = []
 
-    # GEOM (CAS / body) — kept for completeness
     for i, e in enumerate(pkg.find(rt.GEOM)):
         try:
             data = pkg.read_resource(e)
@@ -252,12 +509,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
         except Exception as ex:
             report["errors"].append(f"GEOM {e.tgi}: {ex}")
 
-    # MODL / MLOD (furniture / objects).
-    # A package usually has several LOD resources (MODL = highest detail, plus
-    # MLOD LOD0..LODn). We parse them all, then keep only the BEST (most
-    # detailed) variant per object so we don't export overlapping duplicate
-    # meshes. Heuristic: prefer MODL, else the MLOD with the most vertices.
-    lod_candidates = []  # (priority, total_verts, groups, label, rcol)
+    lod_candidates = []
     for type_id in (rt.MODL, rt.MLOD):
         priority = 0 if type_id == rt.MODL else 1
         for i, e in enumerate(pkg.find(type_id)):
@@ -275,17 +527,13 @@ def extract_package(package_path: str, opt: Options) -> dict:
 
     if lod_candidates:
         if not opt.all_lods:
-            # The MODL resource and the highest MLOD usually contain the SAME
-            # geometry. De-duplicate by total vertex count and keep just one
-            # (the most detailed). Prefer MODL (priority 0) on ties.
             lod_candidates.sort(key=lambda c: (-c[1], c[0]))
             best = lod_candidates[0]
             lod_candidates = [best]
         for (_, _, groups, label, rcol_obj) in lod_candidates:
             for gm in groups:
-                collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj))
+                collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj=rcol_obj))
 
-    # ---- export meshes ----
     mesh_records = []
     part_records = []
     break_specs = []
@@ -310,8 +558,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
             entry["files"].append(os.path.basename(fbx_path))
         report["meshes"].append(entry)
 
-        # Build a list of part assets for the optional *_PARTS prefab.
-        parts = _split_connected_components(name, positions, normals, uvs, faces) if opt.parts_prefab else []
+        parts = _group_parts_semantically(name, positions, normals, uvs, faces, min_faces_per_part=10) if opt.parts_prefab else []
         part_asset_names = []
         if parts and len(parts) > 1:
             for part in parts:
@@ -372,9 +619,8 @@ def extract_package(package_path: str, opt: Options) -> dict:
             "part_asset_names": part_asset_names,
         })
 
-    # ---- textures ----
     png_files = []
-    texture_by_key = {}  # (type, group, instance) -> extracted png path
+    texture_by_key = {}
     if opt.png:
         tex_entries = [e for e in pkg.entries if e.type_id in rt.IMAGE_TYPES]
         for i, e in enumerate(tex_entries):
@@ -390,8 +636,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
             except Exception as ex:
                 report["errors"].append(f"TEX {e.tgi}: {ex}")
 
-    # ---- Unity materials (pipeline-aware) ----
-    material_guid = None          # first generated material, used as a generic fallback
+    material_guid = None
     mesh_material_guid_by_name = {}
     mesh_material_name_by_name = {}
     part_asset_material_pairs = []
@@ -403,9 +648,6 @@ def extract_package(package_path: str, opt: Options) -> dict:
 
         material_texture_pairs = []
 
-        # Preferred path: use the actual MATD / MTST bindings from each mesh
-        # group, so multi-part objects (like beds) get the correct material per
-        # part instead of everything receiving the first swatch.
         families = {}
         for rec in mesh_records:
             if rec.get("rcol") is None or rec.get("material_ref") is None:
@@ -465,8 +707,6 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 mesh_material_guid_by_name[rec["name"]] = family_guids[fam_key][0]
                 mesh_material_name_by_name[rec["name"]] = family_names[fam_key][0]
 
-        # Fallback path for unusual packages where direct material parsing did
-        # not yield anything useful.
         if not material_texture_pairs:
             normal = specular = None
             for p in png_files:
@@ -520,8 +760,6 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 if rec["name"] not in mesh_material_guid_by_name:
                     mesh_material_guid_by_name[rec["name"]] = material_guid
 
-        # Every disconnected-island part inherits the first swatch material of
-        # its parent mesh group.
         for rec in mesh_records:
             mesh_mat_name = mesh_material_name_by_name.get(rec["name"])
             if not mesh_mat_name:
@@ -554,14 +792,10 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 "normal": None,
                 "specular": None})
 
-    # Write FBX importer .meta even when we do not generate legacy prefabs.
-    # This prevents Unity's default FBX 0.01 file-scale behaviour and remaps the
-    # first material slot to the first generated swatch material.
     for rec in mesh_records:
         if rec.get("fbx"):
             unity.write_fbx_meta(rec["fbx"], mesh_material_guid_by_name.get(rec["name"], material_guid))
 
-    # ---- colliders + prefab per mesh ----
     if (opt.colliders or opt.prefab):
         for rec in mesh_records:
             name = rec["name"]
