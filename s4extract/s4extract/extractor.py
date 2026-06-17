@@ -353,7 +353,7 @@ def _group_group_group_parts_semantically(mesh_name: str, positions, normals, uv
 
 # Псевдоним для совместимости
 def _group_parts_semantically(mesh_name: str, positions, normals, uvs, faces, min_faces_per_part=10):
-    return _group_parts_semantically(mesh_name, positions, normals, uvs, faces, min_faces_per_part)
+    return _group_group_group_parts_semantically(mesh_name, positions, normals, uvs, faces, min_faces_per_part)
 
 
 def _pick_break_axis(positions):
@@ -532,7 +532,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
             lod_candidates = [best]
         for (_, _, groups, label, rcol_obj) in lod_candidates:
             for gm in groups:
-                collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj=rcol_obj))
+                collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj))
 
     mesh_records = []
     part_records = []
