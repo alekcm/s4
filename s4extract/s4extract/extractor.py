@@ -29,9 +29,92 @@ class Options:
     colliders: bool = True
     prefab: bool = False
     dynamic: bool = True
-    max_hulls: int = 16
-    all_lods: bool = False
+    max_hulls: int = 128
+    all_lods: bool = True
     parts_prefab: bool = True
+
+
+import json
+import struct
+
+def get_or_create_catalog_entry(pkg: DBPF, package_path: str, base_name: str, db_path: str = "catalog_database.json") -> tuple[str, str, str]:
+    db = []
+    if os.path.exists(db_path):
+        try:
+            with open(db_path, "r", encoding="utf-8") as f:
+                db = json.load(f)
+        except Exception:
+            db = []
+            
+    filename = os.path.basename(package_path)
+    entry = None
+    for item in db:
+        if item.get("filename") == filename:
+            entry = item
+            break
+            
+    if entry is None:
+        existing_ids = [int(item.get("id", 0)) for item in db if item.get("id")]
+        next_id = max(existing_ids) + 1 if existing_ids else 1
+        id_str = f"{next_id:04d}"
+        
+        name_str = base_name
+        desc_str = ""
+        stbl_entries = pkg.find(0x220557DA)
+        
+        stbl_data = None
+        for e in stbl_entries:
+            lang_byte = e.instance >> 56
+            if lang_byte == 0x12: # Russian
+                stbl_data = pkg.read_resource(e)
+                break
+        if stbl_data is None and stbl_entries:
+            for e in stbl_entries:
+                lang_byte = e.instance >> 56
+                if lang_byte == 0x00: # English (US)
+                    stbl_data = pkg.read_resource(e)
+                    break
+        if stbl_data is None and stbl_entries:
+            stbl_data = pkg.read_resource(stbl_entries[0])
+            
+        if stbl_data:
+            strings = {}
+            if len(stbl_data) >= 21 and stbl_data[:4] == b"STBL":
+                string_count = struct.unpack_from("<Q", stbl_data, 7)[0]
+                pos = 21
+                for _ in range(string_count):
+                    if pos + 7 > len(stbl_data): break
+                    key = struct.unpack_from("<I", stbl_data, pos)[0]
+                    length = struct.unpack_from("<H", stbl_data, pos+5)[0]
+                    pos += 7
+                    if pos + length > len(stbl_data): break
+                    string_bytes = stbl_data[pos:pos+length]
+                    try:
+                        val = string_bytes.decode("utf-8")
+                    except Exception:
+                        val = string_bytes.decode("latin1", errors="replace")
+                    strings[key] = val
+                    pos += length
+                    
+            if strings:
+                sorted_strings = sorted(strings.values(), key=lambda s: len(s))
+                if sorted_strings:
+                    name_str = sorted_strings[0]
+                    if len(sorted_strings) > 1:
+                        desc_str = sorted_strings[1]
+                        
+        entry = {
+            "id": id_str,
+            "filename": filename,
+            "name": name_str,
+            "description": desc_str,
+            "colors": []
+        }
+        db.append(entry)
+        with open(db_path, "w", encoding="utf-8") as f:
+            json.dump(db, f, indent=2, ensure_ascii=False)
+            
+    return entry["id"], entry["name"], entry["description"]
 
 
 def _classify_texture_role(name: str) -> str:
@@ -470,7 +553,13 @@ def _fracture_mesh(mesh: GeomMesh):
 def extract_package(package_path: str, opt: Options) -> dict:
     pkg = DBPF.from_file(package_path)
     base = os.path.splitext(os.path.basename(package_path))[0]
-    out_root = os.path.join(opt.out_dir, base)
+    
+    # Create the output directory first so the catalog can be saved inside it
+    os.makedirs(opt.out_dir, exist_ok=True)
+    db_path = os.path.join(opt.out_dir, "catalog_database.json")
+    id_str, name_str, desc_str = get_or_create_catalog_entry(pkg, package_path, base, db_path)
+    
+    out_root = os.path.join(opt.out_dir, f"[{id_str}] {base}")
     os.makedirs(out_root, exist_ok=True)
 
     report = {
@@ -525,11 +614,12 @@ def extract_package(package_path: str, opt: Options) -> dict:
             except Exception as ex:
                 report["errors"].append(f"{rt.type_name(type_id)} {e.tgi}: {ex}")
 
+    best_lod_label = ""
     if lod_candidates:
+        lod_candidates.sort(key=lambda c: (-c[1], c[0]))
+        best_lod_label = lod_candidates[0][3]
         if not opt.all_lods:
-            lod_candidates.sort(key=lambda c: (-c[1], c[0]))
-            best = lod_candidates[0]
-            lod_candidates = [best]
+            lod_candidates = [lod_candidates[0]]
         for (_, _, groups, label, rcol_obj) in lod_candidates:
             for gm in groups:
                 collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj))
@@ -784,7 +874,8 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 mesh_names=[rec["name"] for rec in mesh_records],
                 mesh_material_pairs=[(mn, mesh_material_name_by_name[mn]) for mn in mesh_material_name_by_name],
                 part_asset_material_pairs=part_asset_material_pairs,
-                breakable_specs=breakable_specs_with_material)
+                breakable_specs=breakable_specs_with_material,
+                id_str=id_str)
             report["materials"].append({
                 "name": "S4ExtractMaterialFixer",
                 "pipeline": opt.mat_pipeline,
@@ -792,6 +883,92 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 "diffuse": None,
                 "normal": None,
                 "specular": None})
+
+    # Update catalog entry colors in the database with automatic dominant color detection
+    if material_texture_pairs:
+        db_path = os.path.join(opt.out_dir, "catalog_database.json")
+        if os.path.exists(db_path):
+            try:
+                with open(db_path, "r", encoding="utf-8") as f:
+                    db = json.load(f)
+                filename = os.path.basename(package_path)
+                for item in db:
+                    if item.get("filename") == filename:
+                        swatches_found = []
+                        swatch_names_seen = set()
+                        
+                        COLOR_NAMES = {
+                            "Black": (30, 30, 30),
+                            "White": (240, 240, 240),
+                            "Grey": (128, 128, 128),
+                            "Red": (200, 30, 30),
+                            "Orange": (220, 120, 30),
+                            "Yellow": (220, 220, 30),
+                            "Green": (30, 150, 30),
+                            "Blue": (30, 30, 200),
+                            "Dark Blue": (15, 30, 80),
+                            "Light Blue": (150, 200, 240),
+                            "Purple": (120, 30, 120),
+                            "Pink": (240, 150, 180),
+                            "Brown": (100, 60, 30),
+                            "Beige": (220, 200, 170),
+                        }
+
+                        def get_image_dominant_color_hex(png_path):
+                            try:
+                                from PIL import Image
+                                im = Image.open(png_path)
+                                im = im.resize((32, 32))
+                                rgb_im = im.convert("RGB")
+                                colors = rgb_im.getcolors(1024)
+                                most_frequent_color = max(colors, key=lambda x: x[0])[1]
+                                return f"#{most_frequent_color[0]:02x}{most_frequent_color[1]:02x}{most_frequent_color[2]:02x}"
+                            except Exception:
+                                return "#FFFFFF"
+
+                        def get_closest_color_name(hex_str):
+                            h = hex_str.lstrip('#')
+                            r, g, b = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+                            best_name = "Unknown"
+                            best_dist = float('inf')
+                            for name, rgb in COLOR_NAMES.items():
+                                dist = (r - rgb[0])**2 + (g - rgb[1])**2 + (b - rgb[2])**2
+                                if dist < best_dist:
+                                    best_dist = dist
+                                    best_name = name
+                            return best_name
+
+                        for mat_name, albedo_file, _, _ in material_texture_pairs:
+                            parts = mat_name.split("_")
+                            swatch_part = None
+                            for p in parts:
+                                if p.startswith("swatch"):
+                                    swatch_part = p
+                                    break
+                            if not swatch_part or swatch_part in swatch_names_seen:
+                                continue
+                            
+                            swatch_names_seen.add(swatch_part)
+                            hex_color = "#FFFFFF"
+                            color_name = "White"
+                            if albedo_file:
+                                full_albedo_path = os.path.join(out_root, albedo_file)
+                                if os.path.exists(full_albedo_path):
+                                    hex_color = get_image_dominant_color_hex(full_albedo_path)
+                                    color_name = get_closest_color_name(hex_color)
+                                    
+                            swatches_found.append({
+                                "swatch": swatch_part,
+                                "hex": hex_color,
+                                "name": color_name
+                            })
+                            
+                        item["colors"] = sorted(swatches_found, key=lambda x: x["swatch"])
+                        break
+                with open(db_path, "w", encoding="utf-8") as f:
+                    json.dump(db, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
 
     for rec in mesh_records:
         if rec.get("fbx"):
