@@ -772,11 +772,12 @@ public static class {class_name}
 
         int assigned = AssignMappedMaterialsToSceneMeshes();
         string partsPrefab = CreatePartsPrefab();
+        string readyPrefab = CreateReadyPrefab();
 
-        if (changed > 0 || assigned > 0 || !string.IsNullOrEmpty(partsPrefab))
+        if (changed > 0 || assigned > 0 || !string.IsNullOrEmpty(partsPrefab) || !string.IsNullOrEmpty(readyPrefab))
         {{
             AssetDatabase.SaveAssets();
-            Debug.Log("s4extract: fixed " + changed + " material(s), assigned mapped materials to " + assigned + " renderer(s), parts prefab: " + partsPrefab + ", shader: " + shader.name);
+            Debug.Log("s4extract: fixed " + changed + " material(s), assigned mapped materials to " + assigned + " renderer(s), parts prefab: " + partsPrefab + ", ready prefab: " + readyPrefab + ", shader: " + shader.name);
         }}
     }}
 
@@ -792,6 +793,17 @@ public static class {class_name}
         string prefabPath = folder + "/{os.path.basename(out_root)}_READY.prefab";
 
         GameObject root = new GameObject("{os.path.basename(out_root)}_READY");
+        
+        Rigidbody rb = root.GetComponent<Rigidbody>();
+        if (rb == null) rb = root.AddComponent<Rigidbody>();
+        rb.mass = 10f;
+        rb.drag = 0.05f;
+        rb.angularDrag = 0.05f;
+        rb.useGravity = true;
+        rb.isKinematic = false;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+
         int added = 0;
         foreach (string mn in MeshNames)
         {{
@@ -810,6 +822,29 @@ public static class {class_name}
                 r.sharedMaterials = mats;
             }}
             added++;
+        }}
+
+        foreach (string mn in MeshNames)
+        {{
+            string[] guids = AssetDatabase.FindAssets(mn + "_collider t:GameObject");
+            foreach (string g in guids)
+            {{
+                string path = AssetDatabase.GUIDToAssetPath(g);
+                if (string.IsNullOrEmpty(path)) continue;
+                
+                GameObject colModel = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (colModel == null) continue;
+                
+                MeshFilter colMf = colModel.GetComponentInChildren<MeshFilter>();
+                if (colMf != null && colMf.sharedMesh != null)
+                {{
+                    GameObject colGo = new GameObject(colModel.name);
+                    colGo.transform.SetParent(root.transform, false);
+                    MeshCollider mc = colGo.AddComponent<MeshCollider>();
+                    mc.sharedMesh = colMf.sharedMesh;
+                    mc.convex = true;
+                }}
+            }}
         }}
 
         if (added == 0)

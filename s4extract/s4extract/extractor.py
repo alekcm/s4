@@ -613,6 +613,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
             "name": name,
             "fbx": fbx_path,
             "positions": positions,
+            "normals": normals,
             "faces": faces,
             "material_ref": rec.get("material_ref"),
             "rcol": rec.get("rcol"),
@@ -803,6 +804,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
             collider_guids = []
             if opt.colliders:
                 cset = col.build_colliders(rec["positions"], rec["faces"],
+                                           normals=rec.get("normals"),
                                            max_hulls=opt.max_hulls)
                 for ci, part in enumerate(cset.convex_parts):
                     cobj = os.path.join(out_root, f"{name}_collider{ci:02d}.obj")

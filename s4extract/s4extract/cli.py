@@ -58,8 +58,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="compatibility flag; legacy prefabs are off by default")
     ap.add_argument("--static", action="store_true",
                     help="make prefab static (no Rigidbody) instead of dynamic")
-    ap.add_argument("--max-hulls", type=int, default=16,
-                    help="V-HACD: max convex parts per object (default 16)")
+    ap.add_argument("--max-hulls", type=int, default=128,
+                    help="Max convex parts per object (default 128)")
     ap.add_argument("--all-lods", action="store_true",
                     help="export every LOD (default: only the highest-detail one)")
     ap.add_argument("-q", "--quiet", action="store_true")

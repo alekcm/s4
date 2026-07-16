@@ -67,6 +67,27 @@ class App(tk.Tk):
             ttk.Radiobutton(pl, text=p.upper(), value=p,
                             variable=self.v_pipeline).pack(side="left", padx=4)
 
+        split = ttk.Frame(self, padding=(10, 0))
+        split.pack(fill="x")
+        ttk.Label(split, text="Split mode:").pack(side="left")
+        self.v_split = tk.StringVar(value="subsets")
+        ttk.Combobox(split, textvariable=self.v_split,
+                     values=["none", "subsets", "components", "islands", "semantic"],
+                     state="readonly", width=14).pack(side="left", padx=4)
+        self.v_fracture = tk.BooleanVar(value=False)
+        ttk.Checkbutton(split, text="Fracture parts", variable=self.v_fracture).pack(side="left", padx=4)
+        self.v_no_full = tk.BooleanVar(value=False)
+        ttk.Checkbutton(split, text="No full mesh", variable=self.v_no_full).pack(side="left", padx=4)
+
+        split2 = ttk.Frame(self, padding=(10, 0))
+        split2.pack(fill="x")
+        ttk.Label(split2, text="Merge small parts under").pack(side="left")
+        self.v_min_part_faces = tk.StringVar(value="0")
+        ttk.Entry(split2, textvariable=self.v_min_part_faces, width=6).pack(side="left", padx=2)
+        ttk.Label(split2, text="faces, max parts:").pack(side="left")
+        self.v_max_parts = tk.StringVar(value="0")
+        ttk.Entry(split2, textvariable=self.v_max_parts, width=6).pack(side="left", padx=2)
+
         ttk.Button(self, text="Extract", command=self.run).pack(pady=4)
 
         self.log = tk.Text(self, height=14, wrap="word")
@@ -123,6 +144,11 @@ class App(tk.Tk):
             colliders=self.v_col.get(),
             prefab=self.v_prefab.get(),
             dynamic=self.v_dynamic.get(),
+            split_mode=self.v_split.get(),
+            min_part_faces=int(self.v_min_part_faces.get() or 0),
+            max_parts=int(self.v_max_parts.get() or 0),
+            no_full=self.v_no_full.get(),
+            fracture=self.v_fracture.get(),
         )
         for pkg in list(self.packages):
             self._log(f"\n=== {os.path.basename(pkg)} ===")
