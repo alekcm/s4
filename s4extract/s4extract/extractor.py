@@ -954,11 +954,11 @@ def extract_package(package_path: str, opt: Options) -> dict:
     if not strings:
         strings = _read_strings_from_sibling_packages(package_path)
         external_strings = bool(strings)
-    families = _extract_object_families(pkg, strings)
+    obj_families = _extract_object_families(pkg, strings)
 
     # Однообъектный пак (обычный CC): вся папка называется по этому объекту.
-    display_name = families[0]["name"] if len(families) == 1 else None
-    description = families[0]["description"] if len(families) == 1 else None
+    display_name = obj_families[0]["name"] if len(obj_families) == 1 else None
+    description = obj_families[0]["description"] if len(obj_families) == 1 else None
 
     # Название мебели берём из самого .package, а не из имени файла.
     # asset_base уникален: при совпадении названий в разных паках добавляется
@@ -1046,10 +1046,11 @@ def extract_package(package_path: str, opt: Options) -> dict:
     # Разные объекты с одинаковым именем получают суффикс _2/_3 внутри пака.
     # Ресурсы без каталога — прежняя схема "<asset_base>_lodNN".
     best_lod_label = ""
+    mesh_family = {}            # имя меша -> slug объекта-владельца (из каталога)
     if lod_candidates:
         taken_labels = set()
 
-        def assign_labels(cands, label_base, start_index=0):
+        def assign_labels(cands, label_base, fam_slug=None, start_index=0):
             """Назначает мешам имена "<label_base>_lodNN[_gMM]" с учётом
             занятых меток (чтобы не перезаписать файлы)."""
             nonlocal best_lod_label
@@ -1068,14 +1069,16 @@ def extract_package(package_path: str, opt: Options) -> dict:
                     # type starts at zero, which was the original LOD0-only bug.
                     suffix = gm.name[len(old_label):] if gm.name.startswith(old_label) else f"_g{group_index:02d}"
                     gm.name = lod_label + suffix
+                    if fam_slug is not None:
+                        mesh_family[gm.name] = fam_slug
                     collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj))
 
         handled = set()
 
-        if families:
+        if obj_families:
             used_slugs = set()
             unnamed_count = 0
-            for fam in families:
+            for fam in obj_families:
                 members = [ci for ci, c in enumerate(lod_candidates)
                            if c[5][2] in fam["model_instances"]]
                 if not members:
@@ -1098,7 +1101,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 cands.sort(key=lambda c: (-c[1], c[0], c[3]))
                 if not opt.all_lods:
                     cands = cands[:1]
-                assign_labels(cands, slug)
+                assign_labels(cands, slug, fam_slug=slug)
 
         # Ресурсы без каталога (или паки без OBJD вообще): старая схема,
         # но с пропуском меток, уже занятых именованными объектами.
@@ -1108,15 +1111,40 @@ def extract_package(package_path: str, opt: Options) -> dict:
             rest = rest[:1]
         assign_labels(rest, asset_base)
 
+    # --- Пообъектные подпапки ----------------------------------------------
+    # Если в паке больше одного объекта каталога (большие паки типа
+    # ClientFullBuild), каждый объект складывается в свою подпапку: меши,
+    # материалы, его текстуры, части, коллайдеры и префабы — чтобы можно было
+    # перетащить в Unity объект по одному, а не всю папку-монстра сразу.
+    # Однообъектные паки (обычный CC) остаются плоскими, как раньше.
+    obj_slugs = [f["slug"] for f in obj_families if f.get("slug")]
+    per_object_dirs = len(obj_slugs) > 1
+
+    def folder_for_slug(slug: str, create: bool = True) -> str:
+        d = os.path.join(out_root, slug)
+        if create:
+            os.makedirs(d, exist_ok=True)
+        return d
+
+    def folder_for(mesh_name: str | None, create: bool = True) -> str:
+        """Папка для файлов меша: подпапка его объекта или корень пака."""
+        if per_object_dirs and mesh_name:
+            slug = mesh_family.get(mesh_name)
+            if slug:
+                return folder_for_slug(slug, create=create)
+        return out_root
+
     # Уникальные имена объектов пака -> в запись каталога (поле "objects").
-    if families:
+    if obj_families:
         try:
             db_objects = [{
                 "name": fam.get("name"),
                 "assetName": fam.get("slug"),
                 "description": fam.get("description"),
                 "price": fam.get("price"),
-            } for fam in families if fam.get("slug")]
+                "folder": (os.path.basename(out_root) + "/" + fam["slug"]
+                           if per_object_dirs else os.path.basename(out_root)),
+            } for fam in obj_families if fam.get("slug")]
             _update_catalog_objects(db_path, id_str, db_objects)
             report["objects"] = db_objects
         except Exception:
@@ -1131,17 +1159,18 @@ def extract_package(package_path: str, opt: Options) -> dict:
         uvs = rec["uvs"]
         faces = rec["faces"]
         name = rec["name"]
+        mesh_dir = folder_for(name)
         gm = GeomMesh(name=name, positions=positions, normals=normals,
                       uvs=uvs, faces=faces)
         entry = {"name": name, "verts": gm.vertex_count,
                  "faces": gm.face_count, "files": []}
         fbx_path = None
         if opt.obj:
-            p = os.path.join(out_root, name + ".obj")
+            p = os.path.join(mesh_dir, name + ".obj")
             write_obj(gm, p)
             entry["files"].append(os.path.basename(p))
         if opt.fbx:
-            fbx_path = os.path.join(out_root, name + ".fbx")
+            fbx_path = os.path.join(mesh_dir, name + ".fbx")
             write_fbx(gm, fbx_path)
             entry["files"].append(os.path.basename(fbx_path))
         report["meshes"].append(entry)
@@ -1151,7 +1180,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
         if parts and len(parts) > 1:
             for part in parts:
                 capped_part = close_open_boundaries(part)
-                pobj = os.path.join(out_root, capped_part.name + ".obj")
+                pobj = os.path.join(mesh_dir, capped_part.name + ".obj")
                 write_obj(capped_part, pobj)
                 part_asset_names.append(capped_part.name)
                 part_records.append({
@@ -1163,7 +1192,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 broken = _fracture_mesh(capped_part)
                 broken_asset_names = []
                 for bp in broken:
-                    bp_path = os.path.join(out_root, bp.name + ".obj")
+                    bp_path = os.path.join(mesh_dir, bp.name + ".obj")
                     write_obj(bp, bp_path)
                     broken_asset_names.append(bp.name)
                 if broken_asset_names:
@@ -1175,7 +1204,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
         else:
             base_part = close_open_boundaries(gm)
             if opt.obj:
-                p = os.path.join(out_root, name + ".obj")
+                p = os.path.join(mesh_dir, name + ".obj")
                 write_obj(base_part, p)
             part_asset_names.append(name)
             part_records.append({
@@ -1187,7 +1216,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
             broken = _fracture_mesh(base_part)
             broken_asset_names = []
             for bp in broken:
-                bp_path = os.path.join(out_root, bp.name + ".obj")
+                bp_path = os.path.join(mesh_dir, bp.name + ".obj")
                 write_obj(bp, bp_path)
                 broken_asset_names.append(bp.name)
             if broken_asset_names:
@@ -1210,16 +1239,41 @@ def extract_package(package_path: str, opt: Options) -> dict:
 
     png_files = []
     texture_by_key = {}
+
+    # При пообъектных папках текстура кладётся к объекту, чей материал её
+    # использует (первый ссылающийся меш). Общие/неиспользуемые текстуры
+    # остаются в корне пака, как раньше.
+    tex_owner = {}
+    if per_object_dirs:
+        for rec in mesh_records:
+            slug = mesh_family.get(rec["name"])
+            if not slug or rec.get("rcol") is None or rec.get("material_ref") is None:
+                continue
+            try:
+                for mv in (material_variants(rec["rcol"], rec["material_ref"]) or []):
+                    for k in (mv.diffuse_key, mv.normal_key, mv.specular_key):
+                        if k and k not in tex_owner:
+                            tex_owner[k] = rec["name"]
+            except Exception:
+                continue
+
     if opt.png:
         tex_entries = [e for e in pkg.entries if e.type_id in rt.IMAGE_TYPES]
+        tex_counters = {}
         for i, e in enumerate(tex_entries):
             try:
                 data = pkg.read_resource(e)
-                name = f"{asset_base}_tex{i:02d}"
-                p = os.path.join(out_root, name + ".png")
+                key = (e.type_id, e.group_id, e.instance)
+                owner_mesh = tex_owner.get(key)
+                prefix = mesh_family.get(owner_mesh) if owner_mesh else asset_base
+                dest_dir = folder_for(owner_mesh) if owner_mesh else out_root
+                ti = tex_counters.get(prefix, 0)
+                tex_counters[prefix] = ti + 1
+                name = f"{prefix}_tex{ti:02d}"
+                p = os.path.join(dest_dir, name + ".png")
                 status = textures.save_as_png(data, p)
                 png_files.append(p)
-                texture_by_key[(e.type_id, e.group_id, e.instance)] = p
+                texture_by_key[key] = p
                 report["textures"].append({"name": name, "status": status,
                                            "file": os.path.basename(p)})
             except Exception as ex:
@@ -1230,12 +1284,15 @@ def extract_package(package_path: str, opt: Options) -> dict:
     mesh_material_name_by_name = {}
     part_asset_material_pairs = []
     breakable_specs_with_material = []
+    part_owner_mesh = {}   # part asset -> исходный меш
+    break_owner_mesh = {}  # intact part -> исходный меш
     if opt.unity_mat and png_files:
         for p in png_files:
             if os.path.exists(p):
                 unity.write_texture_meta(p)
 
         material_texture_pairs = []
+        material_pair_owners = []   # [(owner_mesh_or_None, pair)] — для пообъектных JSON
 
         families = {}
         for rec in mesh_records:
@@ -1264,18 +1321,20 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 mi = created_i
                 created_i += 1
                 mat_name = f"{label}_swatch{mi:02d}_material"
-                mat_path = os.path.join(out_root, mat_name + ".mat")
+                mat_path = os.path.join(folder_for(label), mat_name + ".mat")
                 unity.write_material(
                     mat_path, mat_name, pipeline=opt.mat_pipeline,
                     diffuse_png=diffuse, normal_png=normal, specular_png=specular)
                 guid = unity._guid_for(os.path.basename(mat_path))
                 guids.append(guid)
                 names.append(mat_name)
-                material_texture_pairs.append((
+                pair = (
                     mat_name,
                     os.path.basename(diffuse) if diffuse else "",
                     os.path.basename(normal) if normal else None,
-                    os.path.basename(specular) if specular else None))
+                    os.path.basename(specular) if specular else None)
+                material_texture_pairs.append(pair)
+                material_pair_owners.append((label, pair))
                 if material_guid is None:
                     material_guid = guid
                 report["materials"].append({
@@ -1324,11 +1383,13 @@ def extract_package(package_path: str, opt: Options) -> dict:
                     mat_path, mat_name, pipeline=opt.mat_pipeline,
                     diffuse_png=diffuse, normal_png=normal, specular_png=specular)
                 guid = unity._guid_for(os.path.basename(mat_path))
-                material_texture_pairs.append((
+                pair = (
                     mat_name,
                     os.path.basename(diffuse) if diffuse else "",
                     os.path.basename(normal) if normal else None,
-                    os.path.basename(specular) if specular else None))
+                    os.path.basename(specular) if specular else None)
+                material_texture_pairs.append(pair)
+                material_pair_owners.append((None, pair))
                 if material_guid is None:
                     material_guid = guid
                 report["materials"].append({
@@ -1355,6 +1416,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 continue
             for asset_name in rec.get("part_asset_names", []):
                 part_asset_material_pairs.append((asset_name, mesh_mat_name))
+                part_owner_mesh[asset_name] = rec["name"]
 
         for spec in break_specs:
             mesh_mat_name = mesh_material_name_by_name.get(spec["mesh_name"])
@@ -1365,43 +1427,89 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 mesh_mat_name,
                 list(spec.get("broken_asset_names", [])),
             ))
+            break_owner_mesh[spec["intact_asset_name"]] = spec["mesh_name"]
 
         if material_texture_pairs:
-            # === Новая batch-архитектура: JSON + единый Editor-скрипт ===
-            export_data = {
-                "folderName": os.path.basename(out_root),
-                "id": id_str,
-                "assetName": os.path.basename(out_root).split("] ", 1)[-1] if "] " in os.path.basename(out_root) else os.path.basename(out_root),
-                "materials": [],
-                "meshNames": [rec["name"] for rec in mesh_records],
-                "meshMaterials": [{"meshName": mn, "materialName": matn} 
-                                   for mn, matn in mesh_material_name_by_name.items()],
-                "partAssets": [{"assetName": an, "materialName": matn} 
-                              for an, matn in part_asset_material_pairs],
-                "breakSpecs": [{"intactAssetName": intact, "materialName": mat, "brokenAssetNames": broken}
-                              for intact, mat, broken in breakable_specs_with_material],
-            }
-            
-            for mat_name, albedo_file, normal_file, mask_file in material_texture_pairs:
-                export_data["materials"].append({
-                    "materialName": mat_name,
-                    "albedoName": os.path.splitext(albedo_file)[0] if albedo_file else "",
-                    "normalName": os.path.splitext(normal_file)[0] if normal_file else "",
-                    "maskName": os.path.splitext(mask_file)[0] if mask_file else "",
-                })
-            
-            json_path = unity.write_export_json(out_root, export_data, opt.out_dir)
-            batch_script = unity.write_batch_editor_script(opt.out_dir, opt.mat_pipeline)
-            
-            report["materials"].append({
-                "name": "S4ExtractBatchFixer",
-                "pipeline": opt.mat_pipeline,
-                "file": os.path.relpath(batch_script, out_root).replace(os.sep, "/"),
-                "data_file": os.path.relpath(json_path, out_root).replace(os.sep, "/"),
-                "diffuse": None,
-                "normal": None,
-                "specular": None,
-            })
+            # === batch-архитектура: JSON + единый Editor-скрипт ===
+            # При пообъектных папках пишем ОДИН JSON НА ОБЪЕКТ — фиксер в Unity
+            # создаст по префабу на объект прямо в папке этого объекта (папка
+            # префаба берётся из расположения материала). Однообъектные паки —
+            # единый JSON на пак, как раньше.
+            root_basename = os.path.basename(out_root)
+            root_asset_name = (root_basename.split("] ", 1)[-1]
+                               if "] " in root_basename else root_basename)
+            rest_mesh_names = [rec["name"] for rec in mesh_records
+                               if mesh_family.get(rec["name"]) is None]
+            palette_count = sum(1 for owner, _ in material_pair_owners if owner is None)
+
+            buckets = []  # (папка_ассетов, folderName, assetName, mesh_names)
+            if per_object_dirs:
+                for fam in obj_families:
+                    slug = fam.get("slug")
+                    if not slug:
+                        continue
+                    meshes = [rec["name"] for rec in mesh_records
+                              if mesh_family.get(rec["name"]) == slug]
+                    buckets.append((folder_for_slug(slug), slug, slug, meshes))
+            if rest_mesh_names or not buckets or palette_count:
+                all_names = ([rec["name"] for rec in mesh_records]
+                             if not per_object_dirs else rest_mesh_names)
+                buckets.append((out_root, root_basename, root_asset_name, all_names))
+
+            json_paths = []
+            for b_dir, b_folder, b_asset, b_meshes in buckets:
+                mesh_set = set(b_meshes)
+                b_mats = []
+                for owner, pair in material_pair_owners:
+                    if owner is None:
+                        if not per_object_dirs or b_dir == out_root:
+                            b_mats.append(pair)
+                    elif owner in mesh_set:
+                        b_mats.append(pair)
+                if not b_mats:
+                    continue
+
+                export_data = {
+                    "folderName": b_folder,
+                    "id": id_str,
+                    "assetName": b_asset,
+                    "materials": [],
+                    "meshNames": b_meshes,
+                    "meshMaterials": [{"meshName": mn, "materialName": matn}
+                                       for mn, matn in mesh_material_name_by_name.items()
+                                       if mn in mesh_set],
+                    "partAssets": [{"assetName": an, "materialName": matn}
+                                   for an, matn in part_asset_material_pairs
+                                   if part_owner_mesh.get(an) in mesh_set],
+                    "breakSpecs": [{"intactAssetName": intact, "materialName": mat,
+                                    "brokenAssetNames": broken}
+                                   for intact, mat, broken in breakable_specs_with_material
+                                   if break_owner_mesh.get(intact) in mesh_set],
+                }
+
+                for mat_name, albedo_file, normal_file, mask_file in b_mats:
+                    export_data["materials"].append({
+                        "materialName": mat_name,
+                        "albedoName": os.path.splitext(albedo_file)[0] if albedo_file else "",
+                        "normalName": os.path.splitext(normal_file)[0] if normal_file else "",
+                        "maskName": os.path.splitext(mask_file)[0] if mask_file else "",
+                    })
+
+                json_path = unity.write_export_json(b_dir, export_data, opt.out_dir)
+                json_paths.append(json_path)
+
+            if json_paths:
+                batch_script = unity.write_batch_editor_script(opt.out_dir, opt.mat_pipeline)
+                for json_path in json_paths:
+                    report["materials"].append({
+                        "name": "S4ExtractBatchFixer",
+                        "pipeline": opt.mat_pipeline,
+                        "file": os.path.relpath(batch_script, out_root).replace(os.sep, "/"),
+                        "data_file": os.path.relpath(json_path, out_root).replace(os.sep, "/"),
+                        "diffuse": None,
+                        "normal": None,
+                        "specular": None,
+                    })
 
     # Update catalog entry colors in the database with automatic dominant color detection
     if material_texture_pairs:
@@ -1563,14 +1671,14 @@ def extract_package(package_path: str, opt: Options) -> dict:
                                            max_hulls=opt.max_hulls,
                                            merge_convex_neighbors=opt.merge_convex_neighbors)
                 for ci, part in enumerate(cset.convex_parts):
-                    cobj = os.path.join(out_root, f"{name}_collider{ci:02d}.obj")
+                    cobj = os.path.join(folder_for(name), f"{name}_collider{ci:02d}.obj")
                     cguid = unity.write_collider_obj(cobj, part)
                     collider_guids.append(cguid)
 
             if opt.prefab and rec["fbx"]:
                 rec_mat_guid = mesh_material_guid_by_name.get(name, material_guid)
                 fbx_guid = unity.write_fbx_meta(rec["fbx"], rec_mat_guid)
-                prefab_path = os.path.join(out_root, name + ".prefab")
+                prefab_path = os.path.join(folder_for(name), name + ".prefab")
                 unity.write_prefab(
                     prefab_path, name, fbx_guid, rec_mat_guid,
                     cset, collider_guids, dynamic=opt.dynamic)
