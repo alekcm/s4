@@ -90,10 +90,97 @@ def _thicken_vertices(vertices: list[tuple[float, float, float]], min_thickness:
     return [tuple(p) for p in thickened]
 
 
+def _bbox_distance(a: ConvexPart, b: ConvexPart) -> float:
+    """Shortest distance between axis-aligned bounds of two convex parts."""
+    amin, amax = _compute_bbox(a.vertices)
+    bmin, bmax = _compute_bbox(b.vertices)
+    squared = 0.0
+    for axis in range(3):
+        if amax[axis] < bmin[axis]:
+            delta = bmin[axis] - amax[axis]
+        elif bmax[axis] < amin[axis]:
+            delta = amin[axis] - bmax[axis]
+        else:
+            delta = 0.0
+        squared += delta * delta
+    return math.sqrt(squared)
+
+
+def _merge_nearly_convex_neighbors(parts: list[ConvexPart],
+                                   max_inflation: float = 0.05,
+                                   contact_epsilon: float = 0.002) -> list[ConvexPart]:
+    """Greedily merge touching hulls only when their union stays near-convex.
+
+    This reduces duplicate/UV-seam fragments without bridging a physical gap.
+    A pair must first have touching (or nearly touching) AABBs, and the convex
+    hull of their union may add at most ``max_inflation`` empty volume.
+    """
+    if len(parts) < 2:
+        return parts
+    try:
+        import numpy as np
+        from scipy.spatial import ConvexHull
+    except ImportError:
+        return parts
+
+    def hull_for(vertices):
+        pts = np.asarray(vertices, dtype=np.float64)
+        hull = ConvexHull(pts)
+        indices = sorted(set(int(i) for i in hull.vertices))
+        remap = {old: new for new, old in enumerate(indices)}
+        return (ConvexPart(
+            vertices=[tuple(map(float, pts[i])) for i in indices],
+            faces=[tuple(remap[int(i)] for i in simplex) for simplex in hull.simplices],
+        ), float(hull.volume))
+
+    # Parts produced above are already hulls. Recalculate volume once so we can
+    # compare it with a candidate union hull.
+    work = []
+    for part in parts:
+        try:
+            hull, volume = hull_for(part.vertices)
+            work.append((hull, volume))
+        except Exception:
+            work.append((part, None))
+
+    while True:
+        best = None  # (inflation, i, j, union_part, union_volume)
+        for i in range(len(work)):
+            a, avol = work[i]
+            if avol is None or avol <= 1e-9:
+                continue
+            for j in range(i + 1, len(work)):
+                b, bvol = work[j]
+                if bvol is None or bvol <= 1e-9:
+                    continue
+                # Do not use a hull to cross an actual opening in the model.
+                if _bbox_distance(a, b) > contact_epsilon:
+                    continue
+                try:
+                    merged, mvol = hull_for(a.vertices + b.vertices)
+                except Exception:
+                    continue
+                inflation = mvol / (avol + bvol) - 1.0
+                if inflation <= max_inflation:
+                    candidate = (inflation, i, j, merged, mvol)
+                    if best is None or candidate[0] < best[0]:
+                        best = candidate
+        if best is None:
+            break
+        _, i, j, merged, volume = best
+        # Replace the pair and repeat. Greedy lowest-inflation first prevents a
+        # later, looser merge from consuming a more exact candidate.
+        work[i] = (merged, volume)
+        del work[j]
+
+    return [part for part, _ in work]
+
+
 def build_colliders(positions, faces,
                     normals: list[tuple[float, float, float]] | None = None,
                     max_hulls: int = 128,
-                    max_verts_per_hull: int = 64) -> ColliderSet:
+                    max_verts_per_hull: int = 64,
+                    merge_convex_neighbors: bool = True) -> ColliderSet:
     """Return a ColliderSet split by connected components (loose parts).
 
     Tries to find connected components of the mesh (loose parts) with surface-normal
@@ -318,6 +405,11 @@ def build_colliders(positions, faces,
                 good_parts.append(ConvexPart(vertices=comp_pts, faces=comp_tris))
                 
         if good_parts:
+            # Compound colliders are already the correct representation for a
+            # movable concave object. This pass only removes needless splits:
+            # it never joins shapes across a visible gap or a concavity.
+            if merge_convex_neighbors:
+                good_parts = _merge_nearly_convex_neighbors(good_parts)
             if len(good_parts) > max_hulls:
                 good_parts.sort(key=lambda p: len(p.vertices), reverse=True)
                 good_parts = good_parts[:max_hulls]

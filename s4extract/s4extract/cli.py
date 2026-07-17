@@ -65,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="make prefab static (no Rigidbody)")
     ap.add_argument("--max-hulls", type=int, default=128,
                     help="Max convex parts per object (default 128)")
+    ap.add_argument("--no-convex-merge", action="store_false", dest="merge_convex_neighbors",
+                    help="keep every generated convex fragment; disable safe near-convex merging")
     # Defaults: all_lods=True (extract all LODs), no_cas=True (skip CAS), extract_geom=False
     ap.add_argument("--all-lods", action="store_true", default=True,
                     help="(default on) extract all LOD levels")
@@ -107,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         prefab=args.prefab,
         dynamic=not args.static,
         max_hulls=args.max_hulls,
+        merge_convex_neighbors=args.merge_convex_neighbors,
         all_lods=args.all_lods,
         no_cas=args.no_cas,
         extract_geom=args.geom,

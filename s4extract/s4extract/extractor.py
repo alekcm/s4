@@ -31,6 +31,7 @@ class Options:
     prefab: bool = False
     dynamic: bool = True
     max_hulls: int = 128
+    merge_convex_neighbors: bool = True
     all_lods: bool = True   # по умолчанию извлекаем все LOD-уровни
     parts_prefab: bool = True
     no_cas: bool = True     # по умолчанию пропускаем CAS (одежда/волосы)
@@ -1081,7 +1082,8 @@ def extract_package(package_path: str, opt: Options) -> dict:
             if opt.colliders:
                 cset = col.build_colliders(rec["positions"], rec["faces"],
                                            normals=rec.get("normals"),
-                                           max_hulls=opt.max_hulls)
+                                           max_hulls=opt.max_hulls,
+                                           merge_convex_neighbors=opt.merge_convex_neighbors)
                 for ci, part in enumerate(cset.convex_parts):
                     cobj = os.path.join(out_root, f"{name}_collider{ci:02d}.obj")
                     cguid = unity.write_collider_obj(cobj, part)

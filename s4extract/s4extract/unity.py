@@ -1028,9 +1028,12 @@ public static class {class_name}
                 MeshFilter colMf = colModel.GetComponentInChildren<MeshFilter>();
                 if (colMf != null && colMf.sharedMesh != null)
                 {{
-                    GameObject colGo = new GameObject(colModel.name);
-                    colGo.transform.SetParent(root.transform, false);
-                    MeshCollider mc = colGo.AddComponent<MeshCollider>();
+                    // All collider meshes are already exported in the root's
+                    // local coordinate space. Multiple Collider components on
+                    // one Rigidbody are still a PhysX compound collider, but
+                    // avoiding a child GameObject per hull removes Transform
+                    // and hierarchy overhead without changing its geometry.
+                    MeshCollider mc = root.AddComponent<MeshCollider>();
                     mc.sharedMesh = colMf.sharedMesh;
                     mc.convex = true;
                 }}
@@ -1940,9 +1943,12 @@ public static class S4ExtractBatchFixer
                 MeshFilter colMf = colModel.GetComponentInChildren<MeshFilter>();
                 if (colMf != null && colMf.sharedMesh != null)
                 {{
-                    GameObject colGo = new GameObject(colModel.name);
-                    colGo.transform.SetParent(root.transform, false);
-                    MeshCollider mc = colGo.AddComponent<MeshCollider>();
+                    // All collider meshes are already exported in the root's
+                    // local coordinate space. Multiple Collider components on
+                    // one Rigidbody are still a PhysX compound collider, but
+                    // avoiding a child GameObject per hull removes Transform
+                    // and hierarchy overhead without changing its geometry.
+                    MeshCollider mc = root.AddComponent<MeshCollider>();
                     mc.sharedMesh = colMf.sharedMesh;
                     mc.convex = true;
                 }}
