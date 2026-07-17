@@ -68,6 +68,40 @@ S4_FMT_FLOAT16_2 = 15
 S4_FMT_FLOAT16_4 = 16
 
 # ---------------------------------------------------------------------------
+# Sims 4 shader IDs
+# ---------------------------------------------------------------------------
+# Drop-shadow / shadow-map helper shaders (already filtered in parse_object_mesh)
+SHADER_DROP_SHADOW = 0xC09C7582
+SHADER_SHADOW_MAP = 0x21FE207D
+
+# CAS shaders — human skin / hair / clothing materials
+CAS_SHADER_HUMAN_SKIN = 0x37CE2622
+CAS_SHADER_HUMAN_HAIR = 0x7647A8B3
+CAS_SHADER_MATERIAL = 0xA282F69F
+CAS_SHADER_HAIR = 0x6B7D2B2D
+CAS_SHADER_SKIN = 0x1D29B0C3
+
+CAS_SHADERS = frozenset({
+    CAS_SHADER_HUMAN_SKIN,
+    CAS_SHADER_HUMAN_HAIR,
+    CAS_SHADER_MATERIAL,
+    CAS_SHADER_HAIR,
+    CAS_SHADER_SKIN,
+})
+
+
+def is_cas_shader(shader_id: int | None) -> bool:
+    """Return True if the shader is a CAS (human body/hair/clothing) shader.
+    
+    Sims 4 uses distinct shader IDs for CAS resources vs object/build resources.
+    This function checks against the known CAS shader list.
+    """
+    if shader_id is None:
+        return False
+    return shader_id in CAS_SHADERS
+
+
+# ---------------------------------------------------------------------------
 # Legacy compatibility path used by this repo's old synthetic fixture
 # ---------------------------------------------------------------------------
 LEGACY_USAGE_POSITION = 1
@@ -602,7 +636,7 @@ def material_variants(rcol: RCOL, mat_ref: int) -> list[MaterialVariant]:
         return []
 
 
-def parse_object_mesh(rcol: RCOL, name: str = "object") -> list:
+def parse_object_mesh(rcol: RCOL, name: str = "object", no_cas: bool = False) -> list:
     mlod_idx = rcol.find_chunks_by_sig(b"MLOD")
     if not mlod_idx:
         mlod_idx = rcol.find_chunks_by_sig(b"MODL")
@@ -613,6 +647,28 @@ def parse_object_mesh(rcol: RCOL, name: str = "object") -> list:
     pos = 4
     version = struct.unpack_from("<I", mlod, pos)[0]; pos += 4
     group_count = struct.unpack_from("<I", mlod, pos)[0]; pos += 4
+
+    # When filtering CAS objects, peek at the first non-shadow group's shader.
+    # If it is a CAS shader (skin/hair/clothing), skip the entire MLOD.
+    # This works because Sims 4 objects are uniformly CAS or uniformly Objects.
+    if no_cas and group_count > 0:
+        try:
+            scan_pos = pos + 4
+            for _ in range(group_count):
+                grp_start = scan_pos
+                subset_bytes = struct.unpack_from("<I", mlod, scan_pos)[0]
+                scan_next = grp_start + 4 + subset_bytes
+                sp = scan_pos + 4 + 4  # skip name_hash, get mat_ref
+                mat_ref = struct.unpack_from("<I", mlod, sp)[0]
+                shader = _material_shader(rcol, mat_ref)
+                scan_pos = scan_next
+                if shader in (SHADER_DROP_SHADOW, SHADER_SHADOW_MAP):
+                    continue
+                if is_cas_shader(shader):
+                    return []
+                break
+        except Exception:
+            pass  # on any parse failure, proceed normally (don't block)
 
     meshes = []
     for g in range(group_count):

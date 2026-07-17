@@ -12,6 +12,13 @@ Options:
     --no-unity        do not generate Unity .mat
     --raw             also dump every raw resource
     --pipeline NAME   unity render pipeline (builtin|urp|hdrp), default builtin
+    --no-colliders    do not generate convex collider meshes
+    --prefab          generate legacy YAML .prefab files
+    --static          make prefab static (no Rigidbody)
+    --max-hulls N     max convex parts per object (default 128)
+    --all-lods        export every LOD (default: only the highest-detail one)
+    --no-cas          skip CAS resources (clothing, hair, human body)
+    --geom            also extract GEOM meshes (off by default — creates 'default' objects)
     -q, --quiet       less output
 """
 from __future__ import annotations
@@ -41,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="s4extract",
         description="Extract The Sims 4 .package files into .obj/.fbx + .png + Unity .mat")
-    ap.add_argument("inputs", nargs="+", help=".package file(s) or folder(s)")
+    ap.add_argument("inputs", nargs="*", help=".package file(s) or folder(s)")
     ap.add_argument("-o", "--out", default="extracted", help="output directory")
     ap.add_argument("--no-obj", action="store_true")
     ap.add_argument("--no-fbx", action="store_true")
@@ -53,15 +60,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-colliders", action="store_true",
                     help="do not generate convex collider meshes")
     ap.add_argument("--prefab", action="store_true",
-                    help="generate legacy YAML .prefab files (normally not needed; Unity creates *_READY.prefab via Editor fixer)")
-    ap.add_argument("--no-prefab", action="store_true",
-                    help="compatibility flag; legacy prefabs are off by default")
+                    help="generate legacy YAML .prefab files")
     ap.add_argument("--static", action="store_true",
-                    help="make prefab static (no Rigidbody) instead of dynamic")
+                    help="make prefab static (no Rigidbody)")
     ap.add_argument("--max-hulls", type=int, default=128,
                     help="Max convex parts per object (default 128)")
-    ap.add_argument("--all-lods", action="store_true",
-                    help="export every LOD (default: only the highest-detail one)")
+    # Defaults: all_lods=True (extract all LODs), no_cas=True (skip CAS), extract_geom=False
+    ap.add_argument("--all-lods", action="store_true", default=True,
+                    help="(default on) extract all LOD levels")
+    ap.add_argument("--no-lods", action="store_false", dest="all_lods",
+                    help="export only the highest-detail LOD")
+    ap.add_argument("--no-cas", action="store_true", default=True,
+                    help="(default on) skip CAS resources (clothing, hair, human body)")
+    ap.add_argument("--include-cas", action="store_false", dest="no_cas",
+                    help="include CAS resources (clothing, hair)")
+    ap.add_argument("--geom", action="store_true",
+                    help="also extract GEOM meshes (creates extra 'default' objects)")
     ap.add_argument("-q", "--quiet", action="store_true")
     ap.add_argument("--json", action="store_true", help="print JSON report")
     ap.add_argument("--inspect", action="store_true",
@@ -69,9 +83,9 @@ def main(argv: list[str] | None = None) -> int:
                          "(types, sizes, magic signatures) and exit")
     args = ap.parse_args(argv)
 
-    packages = _gather_packages(args.inputs)
+    packages = _gather_packages(args.inputs) if args.inputs else []
     if not packages:
-        print("No .package files found.", file=sys.stderr)
+        print("No .package files found. Drag a .package file onto the .bat or specify a path.", file=sys.stderr)
         return 1
 
     if args.inspect:
@@ -90,10 +104,12 @@ def main(argv: list[str] | None = None) -> int:
         unity_mat=not args.no_unity,
         mat_pipeline=args.pipeline,
         colliders=not args.no_colliders,
-        prefab=args.prefab and not args.no_prefab,
+        prefab=args.prefab,
         dynamic=not args.static,
         max_hulls=args.max_hulls,
         all_lods=args.all_lods,
+        no_cas=args.no_cas,
+        extract_geom=args.geom,
     )
 
     all_reports = []

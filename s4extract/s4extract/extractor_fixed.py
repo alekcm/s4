@@ -31,10 +31,8 @@ class Options:
     prefab: bool = False
     dynamic: bool = True
     max_hulls: int = 128
-    all_lods: bool = True   # по умолчанию извлекаем все LOD-уровни
+    all_lods: bool = True
     parts_prefab: bool = True
-    no_cas: bool = True     # по умолчанию пропускаем CAS (одежда/волосы)
-    extract_geom: bool = False  # по умолчанию не извлекаем GEOM (создаёт мусор "default")
 
 
 import json
@@ -592,15 +590,14 @@ def extract_package(package_path: str, opt: Options) -> dict:
 
     collected = []
 
-    if opt.extract_geom:
-        for i, e in enumerate(pkg.find(rt.GEOM)):
-            try:
-                data = pkg.read_resource(e)
-                m = parse_geom(data, name=f"{base}_geom{i:02d}")
-                if m.vertex_count and m.face_count:
-                    collected.append(_to_common_mesh(m))
-            except Exception as ex:
-                report["errors"].append(f"GEOM {e.tgi}: {ex}")
+    for i, e in enumerate(pkg.find(rt.GEOM)):
+        try:
+            data = pkg.read_resource(e)
+            m = parse_geom(data, name=f"{base}_geom{i:02d}")
+            if m.vertex_count and m.face_count:
+                collected.append(_to_common_mesh(m))
+        except Exception as ex:
+            report["errors"].append(f"GEOM {e.tgi}: {ex}")
 
     lod_candidates = []
     for type_id in (rt.MODL, rt.MLOD):
@@ -610,7 +607,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 data = pkg.read_resource(e)
                 rcol = RCOL(data)
                 label = f"{base}_{rt.type_name(type_id).lower()}{i:02d}"
-                groups = parse_object_mesh(rcol, name=label, no_cas=opt.no_cas)
+                groups = parse_object_mesh(rcol, name=label)
                 groups = [g for g in groups if g.vertex_count and g.face_count]
                 if groups:
                     total = sum(g.vertex_count for g in groups)
@@ -873,41 +870,20 @@ def extract_package(package_path: str, opt: Options) -> dict:
             ))
 
         if material_texture_pairs:
-            # === Новая batch-архитектура: JSON + единый Editor-скрипт ===
-            export_data = {
-                "folderName": os.path.basename(out_root),
-                "id": id_str,
-                "assetName": os.path.basename(out_root).split("] ", 1)[-1] if "] " in os.path.basename(out_root) else os.path.basename(out_root),
-                "materials": [],
-                "meshNames": [rec["name"] for rec in mesh_records],
-                "meshMaterials": [{"meshName": mn, "materialName": matn} 
-                                   for mn, matn in mesh_material_name_by_name.items()],
-                "partAssets": [{"assetName": an, "materialName": matn} 
-                              for an, matn in part_asset_material_pairs],
-                "breakSpecs": [{"intactAssetName": intact, "materialName": mat, "brokenAssetNames": broken}
-                              for intact, mat, broken in breakable_specs_with_material],
-            }
-            
-            for mat_name, albedo_file, normal_file, mask_file in material_texture_pairs:
-                export_data["materials"].append({
-                    "materialName": mat_name,
-                    "albedoName": os.path.splitext(albedo_file)[0] if albedo_file else "",
-                    "normalName": os.path.splitext(normal_file)[0] if normal_file else "",
-                    "maskName": os.path.splitext(mask_file)[0] if mask_file else "",
-                })
-            
-            json_path = unity.write_export_json(out_root, export_data, opt.out_dir)
-            batch_script = unity.write_batch_editor_script(opt.out_dir, opt.mat_pipeline)
-            
+            fixer = unity.write_editor_material_fixer(
+                out_root, opt.mat_pipeline, material_texture_pairs,
+                mesh_names=[rec["name"] for rec in mesh_records],
+                mesh_material_pairs=[(mn, mesh_material_name_by_name[mn]) for mn in mesh_material_name_by_name],
+                part_asset_material_pairs=part_asset_material_pairs,
+                breakable_specs=breakable_specs_with_material,
+                id_str=id_str)
             report["materials"].append({
-                "name": "S4ExtractBatchFixer",
+                "name": "S4ExtractMaterialFixer",
                 "pipeline": opt.mat_pipeline,
-                "file": os.path.relpath(batch_script, out_root).replace(os.sep, "/"),
-                "data_file": os.path.relpath(json_path, out_root).replace(os.sep, "/"),
+                "file": os.path.relpath(fixer, out_root).replace(os.sep, "/"),
                 "diffuse": None,
                 "normal": None,
-                "specular": None,
-            })
+                "specular": None})
 
     # Update catalog entry colors in the database with automatic dominant color detection
     if material_texture_pairs:

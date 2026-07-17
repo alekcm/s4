@@ -1,61 +1,96 @@
 @echo off
-setlocal
+setlocal enableextensions enabledelayedexpansion
 REM ===================================================================
-REM  s4extract CLI launcher (Windows)
-REM  Usage:
-REM    - Drag a .package file (or a folder) onto this .bat
-REM    - Or run from a terminal:  s4extract.bat file.package
-REM  On first run it auto-installs numpy + Pillow into the same Python.
+REM  s4extract launcher (Built-in pipeline).
+REM  Drag a .package file (or a folder) onto this .bat.
+REM
+REM  Defaults:
+REM    --pipeline builtin
+REM    --all-lods             (extract all LOD levels)
+REM    --no-cas               (skip clothing/hair/body meshes)
 REM ===================================================================
 cd /d "%~dp0"
 
-REM --- Pick a Python interpreter (prefer the py launcher) ---
+set "LOGFILE=%~dp0s4extract_log.txt"
+
+echo ======================================== > "%LOGFILE%"
+echo  s4extract launcher (Built-in) >> "%LOGFILE%"
+echo  Time: %date% %time% >> "%LOGFILE%"
+echo ======================================== >> "%LOGFILE%"
+echo. >> "%LOGFILE%"
+
+REM --- Find Python ---
 set "PYEXE="
-where py >nul 2>nul && set "PYEXE=py"
+where py >nul 2>&1 && set "PYEXE=py"
 if not defined PYEXE (
-    where python >nul 2>nul && set "PYEXE=python"
+    where python >nul 2>&1 && set "PYEXE=python"
 )
 if not defined PYEXE (
-    echo [ERROR] Python was not found on this PC.
-    echo Install Python 3.9+ from https://www.python.org/downloads/
-    echo IMPORTANT: tick "Add Python to PATH" during installation.
-    echo.
+    echo [ERROR] Python not found >> "%LOGFILE%"
+    echo Python not found! Install Python 3.9+ from python.org >> "%LOGFILE%"
+    echo Do not forget to check "Add Python to PATH" >> "%LOGFILE%"
+    type "%LOGFILE%"
     pause
     exit /b 1
 )
 
-echo Using Python:
-%PYEXE% --version
+echo [1/4] Python found >> "%LOGFILE%"
+%PYEXE% --version >> "%LOGFILE%" 2>&1
+echo. >> "%LOGFILE%"
 
-REM --- Ensure dependencies (numpy, Pillow) are installed in THIS Python ---
-%PYEXE% -c "import numpy, PIL, trimesh, scipy, vhacdx" 1>nul 2>nul
-if errorlevel 1 (
-    echo.
-    echo [setup] Installing required packages numpy and Pillow ...
-    %PYEXE% -m pip install --upgrade pip 1>nul 2>nul
-    %PYEXE% -m pip install -r "%~dp0requirements.txt"
-    if errorlevel 1 (
-        echo.
-        echo [WARN] Could not install dependencies automatically.
-        echo The tool will still extract meshes (.fbx/.obj^), but textures
-        echo may be saved as .dds instead of .png until you run:
-        echo     %PYEXE% -m pip install numpy Pillow
-        echo.
-    )
-)
-
+REM --- Check input ---
 if "%~1"=="" (
-    echo.
-    echo No file given. Drag a .package file or a folder onto this .bat,
-    echo or run:  s4extract.bat path\to\file.package
-    echo.
+    echo [ERROR] No file specified >> "%LOGFILE%"
+    echo Drag a .package file onto this bat >> "%LOGFILE%"
+    type "%LOGFILE%"
     pause
     exit /b 0
 )
 
-REM --- Run the extractor on every argument passed (files/folders) ---
-%PYEXE% -m s4extract %*
+echo [2/4] Checking dependencies... >> "%LOGFILE%"
 
+%PYEXE% -c "import numpy; import PIL" >nul 2>&1
+if errorlevel 1 (
+    echo Installing numpy and Pillow... >> "%LOGFILE%"
+    %PYEXE% -m pip install numpy Pillow >> "%LOGFILE%" 2>&1
+)
+
+%PYEXE% -c "import trimesh; import scipy" >nul 2>&1
+if errorlevel 1 (
+    echo Installing trimesh and scipy... >> "%LOGFILE%"
+    %PYEXE% -m pip install trimesh scipy >> "%LOGFILE%" 2>&1
+)
+
+%PYEXE% -c "import vhacdx" >nul 2>&1
+if errorlevel 1 (
+    echo Installing vhacdx (may fail - this is OK)... >> "%LOGFILE%"
+    %PYEXE% -m pip install vhacdx >> "%LOGFILE%" 2>&1
+    if errorlevel 1 (
+        echo [WARNING] vhacdx failed - colliders will be limited >> "%LOGFILE%"
+    )
+)
+
+echo. >> "%LOGFILE%"
+
+REM --- Run extraction ---
+echo [3/4] Starting extraction... >> "%LOGFILE%"
+echo File: %~1 >> "%LOGFILE%"
+echo Command: %PYEXE% -m s4extract "%~1" --pipeline builtin --all-lods --no-cas >> "%LOGFILE%"
+echo. >> "%LOGFILE%"
+
+%PYEXE% -m s4extract "%~1" --pipeline builtin --all-lods --no-cas >> "%LOGFILE%" 2>&1
+set "EXIT_CODE=%errorlevel%"
+
+echo. >> "%LOGFILE%"
+echo ======================================== >> "%LOGFILE%"
+echo Finished. Exit code: %EXIT_CODE% >> "%LOGFILE%"
+echo ======================================== >> "%LOGFILE%"
+
+REM --- Show results ---
+type "%LOGFILE%"
 echo.
+echo ========================================
+echo Full log: s4extract_log.txt
+echo ========================================
 pause
 endlocal
