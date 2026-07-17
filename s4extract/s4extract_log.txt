@@ -1,6 +1,6 @@
 ======================================== 
  s4extract HDRP launcher 
- Time: 17.07.2026 15:10:22,35 
+ Time: 17.07.2026 18:05:39,14 
  Working dir: C:\Users\Алекс\Desktop\s4extract 
 ======================================== 
  
@@ -35,10 +35,10 @@ File: C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-O
 === C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-One Styling Station\model.package ===
   -> extracted\[0001] model
   resources: 60
-  mesh  model_mlod00_g01: 2013 verts, 1585 faces -> model_mlod00_g01.obj, model_mlod00_g01.fbx
-  mesh  model_mlod00_g02: 579 verts, 387 faces -> model_mlod00_g02.obj, model_mlod00_g02.fbx
-  mesh  model_modl00_g01: 1296 verts, 821 faces -> model_modl00_g01.obj, model_modl00_g01.fbx
-  mesh  model_modl00_g02: 294 verts, 184 faces -> model_modl00_g02.obj, model_modl00_g02.fbx
+  mesh  model_lod00_g01: 2013 verts, 1585 faces -> model_lod00_g01.obj, model_lod00_g01.fbx
+  mesh  model_lod00_g02: 579 verts, 387 faces -> model_lod00_g02.obj, model_lod00_g02.fbx
+  mesh  model_lod01_g01: 1296 verts, 821 faces -> model_lod01_g01.obj, model_lod01_g01.fbx
+  mesh  model_lod01_g02: 294 verts, 184 faces -> model_lod01_g02.obj, model_lod01_g02.fbx
   tex   model_tex00.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
   tex   model_tex01.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
   tex   model_tex02.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
@@ -55,44 +55,44 @@ File: C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-O
   tex   model_tex13.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
   tex   model_tex14.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
   tex   model_tex15.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  mat   model_mlod00_g01_swatch00_material.mat [hdrp] (diffuse=model_tex00.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch01_material.mat [hdrp] (diffuse=model_tex03.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch02_material.mat [hdrp] (diffuse=model_tex04.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch03_material.mat [hdrp] (diffuse=model_tex05.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch04_material.mat [hdrp] (diffuse=model_tex06.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch05_material.mat [hdrp] (diffuse=model_tex07.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch06_material.mat [hdrp] (diffuse=model_tex08.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch07_material.mat [hdrp] (diffuse=model_tex09.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch08_material.mat [hdrp] (diffuse=model_tex10.png, normal=model_tex01.png)
-  mat   model_mlod00_g01_swatch09_material.mat [hdrp] (diffuse=model_tex11.png, normal=model_tex01.png)
-  mat   model_mlod00_g02_swatch00_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch01_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch02_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch03_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch04_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch05_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch06_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch07_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch08_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_mlod00_g02_swatch09_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g01_swatch00_material.mat [hdrp] (diffuse=model_tex00.png, normal=model_tex02.png)
-  mat   model_modl00_g01_swatch01_material.mat [hdrp] (diffuse=model_tex03.png, normal=model_tex02.png)
-  mat   model_modl00_g01_swatch02_material.mat [hdrp] (diffuse=model_tex04.png, normal=model_tex02.png)
-  mat   model_modl00_g01_swatch03_material.mat [hdrp] (diffuse=model_tex05.png, normal=model_tex02.png)
-  mat   model_modl00_g01_swatch04_material.mat [hdrp] (diffuse=model_tex06.png, normal=model_tex02.png)
-  mat   model_modl00_g01_swatch05_material.mat [hdrp] (diffuse=model_tex07.png, normal=model_tex02.png)
-  mat   model_modl00_g01_swatch06_material.mat [hdrp] (diffuse=model_tex08.png, normal=model_tex02.png)
-  mat   model_modl00_g01_swatch07_material.mat [hdrp] (diffuse=model_tex09.png, normal=model_tex02.png)
-  mat   model_modl00_g01_swatch08_material.mat [hdrp] (diffuse=model_tex10.png, normal=model_tex02.png)
-  mat   model_modl00_g02_swatch00_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g02_swatch01_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g02_swatch02_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g02_swatch03_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g02_swatch04_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g02_swatch05_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g02_swatch06_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g02_swatch07_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_modl00_g02_swatch08_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g01_swatch00_material.mat [hdrp] (diffuse=model_tex00.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch01_material.mat [hdrp] (diffuse=model_tex03.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch02_material.mat [hdrp] (diffuse=model_tex04.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch03_material.mat [hdrp] (diffuse=model_tex05.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch04_material.mat [hdrp] (diffuse=model_tex06.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch05_material.mat [hdrp] (diffuse=model_tex07.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch06_material.mat [hdrp] (diffuse=model_tex08.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch07_material.mat [hdrp] (diffuse=model_tex09.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch08_material.mat [hdrp] (diffuse=model_tex10.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch09_material.mat [hdrp] (diffuse=model_tex11.png, normal=model_tex01.png)
+  mat   model_lod00_g02_swatch00_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch01_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch02_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch03_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch04_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch05_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch06_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch07_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch08_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch09_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g01_swatch00_material.mat [hdrp] (diffuse=model_tex00.png, normal=model_tex02.png)
+  mat   model_lod01_g01_swatch01_material.mat [hdrp] (diffuse=model_tex03.png, normal=model_tex02.png)
+  mat   model_lod01_g01_swatch02_material.mat [hdrp] (diffuse=model_tex04.png, normal=model_tex02.png)
+  mat   model_lod01_g01_swatch03_material.mat [hdrp] (diffuse=model_tex05.png, normal=model_tex02.png)
+  mat   model_lod01_g01_swatch04_material.mat [hdrp] (diffuse=model_tex06.png, normal=model_tex02.png)
+  mat   model_lod01_g01_swatch05_material.mat [hdrp] (diffuse=model_tex07.png, normal=model_tex02.png)
+  mat   model_lod01_g01_swatch06_material.mat [hdrp] (diffuse=model_tex08.png, normal=model_tex02.png)
+  mat   model_lod01_g01_swatch07_material.mat [hdrp] (diffuse=model_tex09.png, normal=model_tex02.png)
+  mat   model_lod01_g01_swatch08_material.mat [hdrp] (diffuse=model_tex10.png, normal=model_tex02.png)
+  mat   model_lod01_g02_swatch00_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g02_swatch01_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g02_swatch02_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g02_swatch03_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g02_swatch04_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g02_swatch05_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g02_swatch06_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g02_swatch07_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod01_g02_swatch08_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
   mat   ../S4Extract_Data/Editor/S4ExtractBatchFixer.cs [hdrp] (diffuse=None, normal=None)
 
 Done. 1 package(s), 4 mesh(es), 16 texture(s).

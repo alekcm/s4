@@ -937,6 +937,31 @@ public static class {class_name}
         }}
     }}
 
+    // Exporter names models <asset>_lodNN_gNN.  The legacy MODL/MLOD
+    // spellings remain accepted so already-exported folders still work.
+    static int GetLodIndex(string assetName)
+    {{
+        if (string.IsNullOrEmpty(assetName)) return -1;
+        string n = assetName.ToLowerInvariant();
+        string[] markers = new string[] {{ "_lod", "mlod", "modl" }};
+        foreach (string marker in markers)
+        {{
+            int at = n.LastIndexOf(marker);
+            if (at < 0) continue;
+            int pos = at + marker.Length;
+            int value = 0;
+            int digits = 0;
+            while (pos < n.Length && n[pos] >= '0' && n[pos] <= '9')
+            {{
+                value = value * 10 + (n[pos] - '0');
+                digits++;
+                pos++;
+            }}
+            if (digits > 0) return value;
+        }}
+        return -1;
+    }}
+
     static string CreateReadyPrefab()
     {{
         if (Entries.Length == 0 || MeshNames.Length == 0) return "";
@@ -986,9 +1011,11 @@ public static class {class_name}
 
         foreach (string mn in MeshNames)
         {{
-            string mnLower = mn.ToLowerInvariant();
-            if (!mnLower.Contains("mlod00") && !mnLower.Contains("modl00")) continue;
-            
+            // Colliders belong only to the most detailed visual mesh.  Use
+            // the same LOD parser as LODGroup: exported names are now _lod00,
+            // while old exports may still be mlod00/modl00.
+            if (GetLodIndex(mn) != 0) continue;
+
             string[] guids = AssetDatabase.FindAssets(mn + "_collider t:GameObject");
             foreach (string g in guids)
             {{
@@ -1015,16 +1042,12 @@ public static class {class_name}
         
         foreach (Transform child in root.transform)
         {{
-            string childName = child.name.ToLowerInvariant();
-            int lodIdx = 0;
-            if (childName.Contains("mlod00") || childName.Contains("modl00")) lodIdx = 0;
-            else if (childName.Contains("mlod01") || childName.Contains("modl01")) lodIdx = 1;
-            else if (childName.Contains("mlod02") || childName.Contains("modl02")) lodIdx = 2;
-            else if (childName.Contains("mlod03") || childName.Contains("modl03")) lodIdx = 3;
-            else continue;
-            
-            var r = child.GetComponentInChildren<Renderer>(true);
-            if (r != null)
+            int lodIdx = GetLodIndex(child.name);
+            if (lodIdx < 0) continue;
+
+            // An imported FBX may contain several renderers.  Every one must
+            // belong to the same LOD, not just the first renderer Unity finds.
+            foreach (Renderer r in child.GetComponentsInChildren<Renderer>(true))
             {{
                 if (!lodRenderers.ContainsKey(lodIdx))
                     lodRenderers[lodIdx] = new System.Collections.Generic.List<Renderer>();
@@ -1037,16 +1060,22 @@ public static class {class_name}
             var keys = new System.Collections.Generic.List<int>(lodRenderers.Keys);
             keys.Sort();
             
+            // The final LOD must have a zero threshold.  Unity otherwise adds
+            // its implicit Culled range after the last positive threshold and
+            // makes the object disappear at distance.
             LOD[] lods = new LOD[keys.Count];
             float[] screenHeights = new float[] {{ 0.5f, 0.15f, 0.05f, 0.01f }};
             
             for (int i = 0; i < keys.Count; i++)
             {{
                 int k = keys[i];
-                float height = (i < screenHeights.Length) ? screenHeights[i] : 0.01f;
+                float height = (i == keys.Count - 1)
+                    ? 0f
+                    : ((i < screenHeights.Length) ? screenHeights[i] : 0.01f);
                 lods[i] = new LOD(height, lodRenderers[k].ToArray());
             }}
             lodGroup.SetLODs(lods);
+            lodGroup.RecalculateBounds();
         }}
 
         var recolor = root.AddComponent<S4Recolorable>();
@@ -1817,6 +1846,31 @@ public static class S4ExtractBatchFixer
         return null;
     }}
 
+    // Exporter names models <asset>_lodNN_gNN.  The legacy MODL/MLOD
+    // spellings remain accepted so already-exported folders still work.
+    static int GetLodIndex(string assetName)
+    {{
+        if (string.IsNullOrEmpty(assetName)) return -1;
+        string n = assetName.ToLowerInvariant();
+        string[] markers = new string[] {{ "_lod", "mlod", "modl" }};
+        foreach (string marker in markers)
+        {{
+            int at = n.LastIndexOf(marker);
+            if (at < 0) continue;
+            int pos = at + marker.Length;
+            int value = 0;
+            int digits = 0;
+            while (pos < n.Length && n[pos] >= '0' && n[pos] <= '9')
+            {{
+                value = value * 10 + (n[pos] - '0');
+                digits++;
+                pos++;
+            }}
+            if (digits > 0) return value;
+        }}
+        return -1;
+    }}
+
     static string CreateReadyPrefab(ExportData data, string jsonPath)
     {{
         if (data.materials.Length == 0 || data.meshNames.Length == 0) return "";
@@ -1869,9 +1923,11 @@ public static class S4ExtractBatchFixer
         // Add colliders
         foreach (string mn in data.meshNames)
         {{
-            string mnLower = mn.ToLowerInvariant();
-            if (!mnLower.Contains("mlod00") && !mnLower.Contains("modl00")) continue;
-            
+            // Colliders belong only to the most detailed visual mesh.  Use
+            // the same LOD parser as LODGroup: exported names are now _lod00,
+            // while old exports may still be mlod00/modl00.
+            if (GetLodIndex(mn) != 0) continue;
+
             string[] guids = AssetDatabase.FindAssets(mn + "_collider t:GameObject");
             foreach (string g in guids)
             {{
@@ -1899,16 +1955,12 @@ public static class S4ExtractBatchFixer
         
         foreach (Transform child in root.transform)
         {{
-            string childName = child.name.ToLowerInvariant();
-            int lodIdx = 0;
-            if (childName.Contains("mlod00") || childName.Contains("modl00")) lodIdx = 0;
-            else if (childName.Contains("mlod01") || childName.Contains("modl01")) lodIdx = 1;
-            else if (childName.Contains("mlod02") || childName.Contains("modl02")) lodIdx = 2;
-            else if (childName.Contains("mlod03") || childName.Contains("modl03")) lodIdx = 3;
-            else continue;
-            
-            var r = child.GetComponentInChildren<Renderer>(true);
-            if (r != null)
+            int lodIdx = GetLodIndex(child.name);
+            if (lodIdx < 0) continue;
+
+            // An imported FBX may contain several renderers.  Every one must
+            // belong to the same LOD, not just the first renderer Unity finds.
+            foreach (Renderer r in child.GetComponentsInChildren<Renderer>(true))
             {{
                 if (!lodRenderers.ContainsKey(lodIdx))
                     lodRenderers[lodIdx] = new List<Renderer>();
@@ -1921,16 +1973,22 @@ public static class S4ExtractBatchFixer
             var keys = new List<int>(lodRenderers.Keys);
             keys.Sort();
             
+            // The final LOD must have a zero threshold.  Unity otherwise adds
+            // its implicit Culled range after the last positive threshold and
+            // makes the object disappear at distance.
             LOD[] lods = new LOD[keys.Count];
             float[] screenHeights = new float[] {{ 0.5f, 0.15f, 0.05f, 0.01f }};
             
             for (int i = 0; i < keys.Count; i++)
             {{
                 int k = keys[i];
-                float height = (i < screenHeights.Length) ? screenHeights[i] : 0.01f;
+                float height = (i == keys.Count - 1)
+                    ? 0f
+                    : ((i < screenHeights.Length) ? screenHeights[i] : 0.01f);
                 lods[i] = new LOD(height, lodRenderers[k].ToArray());
             }}
             lodGroup.SetLODs(lods);
+            lodGroup.RecalculateBounds();
         }}
 
         if (added == 0)

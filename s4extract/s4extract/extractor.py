@@ -618,14 +618,28 @@ def extract_package(package_path: str, opt: Options) -> dict:
             except Exception as ex:
                 report["errors"].append(f"{rt.type_name(type_id)} {e.tgi}: {ex}")
 
+    # A DBPF's physical index order and MODL/MLOD type are *not* LOD numbers.
+    # In particular, an object commonly has MODL[0] and MLOD[0]; naming both
+    # resources "...lod00" made Unity put both renderers into LOD 0.  Give every
+    # successfully decoded model one global, deterministic LOD number instead:
+    # the most detailed mesh is LOD 0, followed by decreasing vertex count.
+    # This also deliberately excludes empty/shadow-only resources.
     best_lod_label = ""
     if lod_candidates:
-        lod_candidates.sort(key=lambda c: (-c[1], c[0]))
-        best_lod_label = lod_candidates[0][3]
+        lod_candidates.sort(key=lambda c: (-c[1], c[0], c[3]))
         if not opt.all_lods:
             lod_candidates = [lod_candidates[0]]
-        for (_, _, groups, label, rcol_obj) in lod_candidates:
-            for gm in groups:
+
+        for lod_index, (_, _, groups, old_label, rcol_obj) in enumerate(lod_candidates):
+            lod_label = f"{base}_lod{lod_index:02d}"
+            if lod_index == 0:
+                best_lod_label = lod_label
+            for group_index, gm in enumerate(groups):
+                # parse_object_mesh has already named it <old_label>_gNN.  Do
+                # not derive a level from the per-type enumerate() index: each
+                # type starts at zero, which was the original LOD0-only bug.
+                suffix = gm.name[len(old_label):] if gm.name.startswith(old_label) else f"_g{group_index:02d}"
+                gm.name = lod_label + suffix
                 collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj))
 
     mesh_records = []

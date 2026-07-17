@@ -253,8 +253,44 @@ def build_colliders(positions, faces,
             if len(used_verts) < 8 and min_dim < 0.01:
                 continue
                 
-            # 3. If it is a valid horizontal tabletop/shelf or large vertical plane that is flat (2D),
-            # we thicken it to 2 cm (0.02) so it has a valid 3D volume, which cooks perfectly in Unity!
+            # 3. Do not fabricate a 2 cm solid from a one-sided, zero-thickness
+            # render card. Sims objects contain many such helper/decal faces. A
+            # convex hull of one creates the conspicuous "phantom" wedges in
+            # Unity, often far larger than the visible face. Real shelves and
+            # glass normally have front/back faces and physical thickness, so
+            # they reach this point with a non-zero min_dim and are retained.
+            #
+            # Use geometric triangle normals here rather than imported vertex
+            # normals: vertex normals are split at UV seams and are unsuitable
+            # for deciding whether the component is a single render surface.
+            flat_epsilon = 1e-4
+            if min_dim < flat_epsilon:
+                normal_sum = [0.0, 0.0, 0.0]
+                normal_count = 0
+                for ia, ib, ic in (faces[fi] for fi in comp_faces):
+                    ax, ay, az = positions[ia]
+                    bx, by, bz = positions[ib]
+                    cx, cy, cz = positions[ic]
+                    ux, uy, uz = bx - ax, by - ay, bz - az
+                    vx, vy, vz = cx - ax, cy - ay, cz - az
+                    nx = uy * vz - uz * vy
+                    ny = uz * vx - ux * vz
+                    nz = ux * vy - uy * vx
+                    length = math.sqrt(nx * nx + ny * ny + nz * nz)
+                    if length > 1e-10:
+                        normal_sum[0] += nx / length
+                        normal_sum[1] += ny / length
+                        normal_sum[2] += nz / length
+                        normal_count += 1
+                if normal_count:
+                    coherence = math.sqrt(sum(v * v for v in normal_sum)) / normal_count
+                    # A value near 1 means every triangle faces the same way:
+                    # this is an open render card, not a solid object part.
+                    if coherence > 0.95:
+                        continue
+
+            # A non-flat thin surface is an actual piece of geometry. Give it
+            # the minimum volume required by Unity's convex MeshCollider.
             if min_dim < 0.02:
                 comp_pts = _thicken_vertices(comp_pts, min_thickness=0.02)
                 
