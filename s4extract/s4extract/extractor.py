@@ -40,85 +40,468 @@ class Options:
 
 import json
 import struct
+import hashlib
+import re
 
-def get_or_create_catalog_entry(pkg: DBPF, package_path: str, base_name: str, db_path: str = "catalog_database.json") -> tuple[str, str, str]:
-    db = []
+# Символы, недопустимые в именах файлов/папок (Windows) — заменяем на "_".
+# Кириллица и пробелы разрешены: Unity и Windows их нормально переваривают.
+_INVALID_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Папки экспорта называются "[0007] chair" — по этому шаблону находим их на диске.
+_FOLDER_RE = re.compile(r"^\[(\d{4})\]\s+(.*)$")
+
+
+def _sanitize_asset_name(name: str, max_len: int = 60) -> str:
+    """Превращает произвольное название мебели в безопасное имя ассета/файла."""
+    name = _INVALID_NAME_CHARS.sub("_", (name or "").strip())
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    if len(name) > max_len:
+        name = name[:max_len].rstrip(" .")
+    return name
+
+
+def _package_signature(package_path: str) -> str:
+    """Быстрая сигнатура содержимого пака: размер + md5 первого и последнего МиБ.
+
+    Нужна, чтобы отличать РАЗНЫЕ паки с одинаковым именем файла
+    (например, два разных fullPackage.package с разных сайтов) —
+    раньше они сливались в одну запись каталога и перезаписывали друг друга.
+    """
+    try:
+        size = os.path.getsize(package_path)
+        h = hashlib.md5()
+        chunk = 1 << 20  # 1 MiB
+        with open(package_path, "rb") as f:
+            h.update(f.read(chunk))
+            if size > chunk:
+                f.seek(max(0, size - chunk))
+                h.update(f.read(chunk))
+        return f"{size}:{h.hexdigest()}"
+    except OSError:
+        return ""
+
+
+def _load_catalog_db(db_path: str) -> list:
     if os.path.exists(db_path):
         try:
             with open(db_path, "r", encoding="utf-8") as f:
-                db = json.load(f)
+                data = json.load(f)
+            return data if isinstance(data, list) else []
         except Exception:
-            db = []
-            
+            return []
+    return []
+
+
+def _save_catalog_db(db_path: str, db: list) -> None:
+    with open(db_path, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2, ensure_ascii=False)
+
+
+def _update_catalog_objects(db_path: str, id_str: str, objects: list) -> None:
+    """Записывает список объектов пака (имена из каталога OBJD/COBJ) в его
+    запись catalog_database.json — поле "objects"."""
+    db = _load_catalog_db(db_path)
+    for item in db:
+        if item.get("id") == id_str:
+            item["objects"] = objects
+            break
+    _save_catalog_db(db_path, db)
+
+
+def _read_stbl_strings(pkg: DBPF) -> dict:
+    """Читает строковую таблицу (STBL, 0x220557DA) пака -> {key: text}.
+
+    Язык: сначала русский (0x12), затем английский US (0x00), затем любой.
+    """
+    stbl_entries = pkg.find(0x220557DA)
+    if not stbl_entries:
+        return {}
+
+    chosen = None
+    for want_lang in (0x12, 0x00):  # Russian, потом English (US)
+        for e in stbl_entries:
+            if (e.instance >> 56) == want_lang:
+                chosen = e
+                break
+        if chosen is not None:
+            break
+    if chosen is None:
+        chosen = stbl_entries[0]
+
+    try:
+        stbl_data = pkg.read_resource(chosen)
+    except Exception:
+        return {}
+
+    strings = {}
+    if len(stbl_data) >= 21 and stbl_data[:4] == b"STBL":
+        string_count = struct.unpack_from("<Q", stbl_data, 7)[0]
+        pos = 21
+        for _ in range(string_count):
+            if pos + 7 > len(stbl_data):
+                break
+            key = struct.unpack_from("<I", stbl_data, pos)[0]
+            length = struct.unpack_from("<H", stbl_data, pos + 5)[0]
+            pos += 7
+            if pos + length > len(stbl_data):
+                break
+            string_bytes = stbl_data[pos:pos + length]
+            try:
+                val = string_bytes.decode("utf-8")
+            except Exception:
+                val = string_bytes.decode("latin1", errors="replace")
+            strings[key] = val
+            pos += length
+    return strings
+
+
+def _resolve_name_and_description(strings: dict, base_name: str) -> tuple[str, str]:
+    """Выбирает из строк пака название мебели и её описание.
+
+    Названия каталога в Sims 4 — короткие однострочные строки;
+    описания обычно длиннее и/или содержат переносы строк.
+    """
+    candidates = sorted(
+        {s.strip() for s in strings.values() if s and s.strip()},
+        key=len,
+    )
+    name = ""
+    for s in candidates:
+        if "\n" not in s and "\r" not in s and len(s) <= 64:
+            name = s
+            break
+    if not name:
+        name = base_name
+    description = ""
+    for s in candidates:
+        if s != name:
+            description = s
+            break
+    return name, description
+
+
+# ---------------------------------------------------------------------------
+# Каталог объектов Sims 4: OBJD (0xC0DB5AE7) + COBJ (0x319E4F1D).
+#
+# OBJD v2 (формат подтверждён S4TK / sims4toolkit models):
+#   uint16 version (== 2)
+#   uint32 table_position
+#   @ table_position: uint16 entry_count, затем entry_count пар (uint32 type,
+#   uint32 offset). Значение свойства читается по его абсолютному offset.
+#
+# Используемые свойства:
+#   Models (0x8D20ACC6) — список TGI моделей объекта: int32 = число_байт/4
+#       записей? (см. ниже), каждая запись 16 байт: instance_hi, instance_lo,
+#       type, group.
+#   Name (0xE7F07786), Tuning (0x790FA4BC), MaterialVariant (0xECD5A95F) —
+#       строка: uint32 длина + байты.
+#   TuningId (0xB994039B) — uint64.
+#   SimoleonPrice (0xE4F4FAA4) — uint32.
+#
+# COBJ: имя объекта (ключ строки STBL) @ 0x08, описание @ 0x0C.
+# Instance COBJ совпадает с instance парного OBJD.
+# ---------------------------------------------------------------------------
+OBJD_TYPE = 0xC0DB5AE7
+COBJ_TYPE = 0x319E4F1D
+
+_OBJDEF_PROP_MODELS = 0x8D20ACC6
+_OBJDEF_PROP_NAME = 0xE7F07786
+_OBJDEF_PROP_TUNING = 0x790FA4BC
+_OBJDEF_PROP_TUNING_ID = 0xB994039B
+_OBJDEF_PROP_MATERIAL_VARIANT = 0xECD5A95F
+_OBJDEF_PROP_PRICE = 0xE4F4FAA4
+
+
+def _parse_objdef(data: bytes) -> dict:
+    """Разбирает OBJD v2 -> {models: [(type, group, instance)], name, tuning,
+    tuning_id, material_variant, price}. Неизвестные свойства пропускаются."""
+    out = {"models": [], "name": None, "tuning": None,
+           "tuning_id": None, "material_variant": None, "price": None}
+    try:
+        if len(data) < 6:
+            return out
+        version = struct.unpack_from("<H", data, 0)[0]
+        if version != 2:
+            return out
+        table_pos = struct.unpack_from("<I", data, 2)[0]
+        if not (0 <= table_pos + 2 <= len(data)):
+            return out
+        entry_count = struct.unpack_from("<H", data, table_pos)[0]
+        pos = table_pos + 2
+
+        def read_string(at):
+            n = struct.unpack_from("<I", data, at)[0]
+            if n > 4096 or at + 4 + n > len(data):
+                return None
+            return data[at + 4:at + 4 + n].decode("utf-8", "replace")
+
+        for _ in range(entry_count):
+            if pos + 8 > len(data):
+                break
+            ptype = struct.unpack_from("<I", data, pos)[0]
+            off = struct.unpack_from("<I", data, pos + 4)[0]
+            pos += 8
+            if not (0 <= off < len(data)):
+                continue
+            try:
+                if ptype == _OBJDEF_PROP_MODELS:
+                    raw = struct.unpack_from("<i", data, off)[0]
+                    count = raw // 4
+                    if 0 < raw <= len(data) - off and 0 < count <= 64:
+                        p = off + 4
+                        for _m in range(count):
+                            if p + 16 > len(data):
+                                break
+                            hi, lo = struct.unpack_from("<II", data, p)
+                            mtype, mgroup = struct.unpack_from("<II", data, p + 8)
+                            out["models"].append((mtype, mgroup, (hi << 32) | lo))
+                            p += 16
+                elif ptype in (_OBJDEF_PROP_NAME, _OBJDEF_PROP_TUNING,
+                               _OBJDEF_PROP_MATERIAL_VARIANT):
+                    s = read_string(off)
+                    if ptype == _OBJDEF_PROP_NAME:
+                        out["name"] = s
+                    elif ptype == _OBJDEF_PROP_TUNING:
+                        out["tuning"] = s
+                    else:
+                        out["material_variant"] = s
+                elif ptype == _OBJDEF_PROP_TUNING_ID:
+                    if off + 8 <= len(data):
+                        out["tuning_id"] = struct.unpack_from("<Q", data, off)[0]
+                elif ptype == _OBJDEF_PROP_PRICE:
+                    if off + 4 <= len(data):
+                        out["price"] = struct.unpack_from("<I", data, off)[0]
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _parse_cobj_keys(data: bytes) -> tuple[int | None, int | None]:
+    """COBJ: (ключ имени @ 0x08, ключ описания @ 0x0C) — uint32 LE."""
+    if len(data) < 16:
+        return (None, None)
+    name_key = struct.unpack_from("<I", data, 8)[0]
+    desc_key = struct.unpack_from("<I", data, 12)[0]
+    return (name_key or None, desc_key or None)
+
+
+def _read_strings_from_sibling_packages(package_path: str) -> dict:
+    """Ищет строковые таблицы в файлах Strings_*.package рядом с паком.
+
+    В игровых паках (ClientFullBuild0.package и т.п.) строк не лежит — игра
+    хранит их в Strings_RUS.package / Strings_ENG_US.package в той же папке.
+    Приоритет: *RUS* -> *ENG* -> первый попавшийся Strings_*.
+    """
+    directory = os.path.dirname(os.path.abspath(package_path))
+    try:
+        candidates = [f for f in os.listdir(directory)
+                      if f.lower().startswith("strings_")
+                      and f.lower().endswith(".package")]
+    except OSError:
+        return {}
+    if not candidates:
+        return {}
+
+    def rank(fn):
+        low = fn.lower()
+        if "rus" in low:
+            return 0
+        if "eng" in low:
+            return 1
+        return 2
+
+    for fn in sorted(candidates, key=lambda f: (rank(f), f)):
+        try:
+            sp = DBPF.from_file(os.path.join(directory, fn))
+            strings = _read_stbl_strings(sp)
+            if strings:
+                return strings
+        except Exception:
+            continue
+    return {}
+
+
+def _extract_object_families(pkg: DBPF, strings: dict) -> list[dict]:
+    """Строит семьи «объект -> его модель» по каталогу OBJD/COBJ.
+
+    Возвращает список семей:
+    {model_instances: {int,...}, name, description, price, tuning}
+    Меши (MODL/MLOD) одного семейства делят один instance id (у MLOD группы
+    0x10000+). Несколько OBJD с одной моделью (цветовые варианты) сливаются
+    в одну семью.
+    """
+    cobj_names = {}
+    for e in pkg.find(COBJ_TYPE):
+        try:
+            name_key, desc_key = _parse_cobj_keys(pkg.read_resource(e))
+        except Exception:
+            continue
+        nm = strings.get(name_key) if name_key else None
+        ds = strings.get(desc_key) if desc_key else None
+        cobj_names[e.instance] = (nm, ds)
+
+    families: list[dict] = []
+    fam_by_model_inst: dict[int, dict] = {}
+    for e in pkg.find(OBJD_TYPE):
+        try:
+            info = _parse_objdef(pkg.read_resource(e))
+        except Exception:
+            continue
+        models = info.get("models") or []
+        if not models:
+            continue
+
+        fam = None
+        for (_t, _g, inst) in models:
+            if inst in fam_by_model_inst:
+                fam = fam_by_model_inst[inst]
+                break
+
+        if fam is None:
+            nm, ds = cobj_names.get(e.instance, (None, None))
+            fam = {"model_instances": set(),
+                   "name": nm,
+                   "description": ds,
+                   "price": info.get("price"),
+                   "tuning": info.get("tuning"),
+                   "objd_count": 0}
+            families.append(fam)
+            fam["objd_count"] += 1
+            for (_t, _g, inst) in models:
+                fam["model_instances"].add(inst)
+                fam_by_model_inst[inst] = fam
+        else:
+            fam["objd_count"] += 1
+            # Если у первого OBJD имени не было — попробуем взять у следующего
+            if not fam.get("name"):
+                nm, ds = cobj_names.get(e.instance, (None, None))
+                if nm:
+                    fam["name"] = nm
+                    fam["description"] = ds
+            for (_t, _g, inst) in models:
+                fam["model_instances"].add(inst)
+                fam_by_model_inst[inst] = fam
+
+    return families
+
+
+def _used_asset_names(db: list, out_dir: str, exclude_id: str | None) -> set:
+    """Все уже занятые имена ассетов: из базы каталога + из папок на диске.
+
+    Папка текущей записи (по её id) не считается конфликтом — иначе повторная
+    распаковка того же пака каждый раз давала бы новый суффикс.
+    """
+    used = set()
+    for item in db:
+        if exclude_id is not None and item.get("id") == exclude_id:
+            continue
+        an = item.get("assetName")
+        if not an:
+            # Легаси-записи без assetName: папка раньше строилась из имени файла
+            an = os.path.splitext(item.get("filename", ""))[0]
+        an = _sanitize_asset_name(an)
+        if an:
+            used.add(an)
+    # Папки "[NNNN] <имя>" на диске тоже резервируют имя — даже если
+    # catalog_database.json потерян, лучше получить chair_2, чем перезапись.
+    try:
+        for d in os.listdir(out_dir):
+            m = _FOLDER_RE.match(d)
+            if m and os.path.isdir(os.path.join(out_dir, d)):
+                if exclude_id is not None and m.group(1) == exclude_id:
+                    continue
+                used.add(m.group(2))
+    except OSError:
+        pass
+    return used
+
+
+def _make_unique_asset_name(slug: str, db: list, out_dir: str, exclude_id: str | None) -> str:
+    """Гарантирует уникальность имени: chair, chair_2, chair_3, ..."""
+    used = _used_asset_names(db, out_dir, exclude_id)
+    candidate = slug
+    n = 2
+    while candidate in used:
+        candidate = f"{slug}_{n}"
+        n += 1
+    return candidate
+
+
+def get_or_create_catalog_entry(pkg: DBPF, package_path: str, base_name: str,
+                                db_path: str = "catalog_database.json",
+                                out_dir: str | None = None,
+                                display_name: str | None = None,
+                                description: str | None = None,
+                                strings: dict | None = None) -> dict:
+    """Находит (или создаёт) запись каталога для пака.
+
+    Ключ записи: (имя файла, сигнатура содержимого) — поэтому два РАЗНЫХ пака
+    с одинаковым именем файла получают РАЗНЫЕ записи и не перезаписывают
+    друг друга. Каждая запись получает уникальное assetName — имя мебели
+    из самого .package (строковая таблица STBL), с суффиксом _2/_3/...
+    при совпадении названий.
+    """
+    db = _load_catalog_db(db_path)
+
     filename = os.path.basename(package_path)
+    signature = _package_signature(package_path)
+    if out_dir is None:
+        out_dir = os.path.dirname(os.path.abspath(db_path))
+
     entry = None
     for item in db:
-        if item.get("filename") == filename:
+        if item.get("filename") != filename:
+            continue
+        item_sig = item.get("sig")
+        if item_sig is None:
+            # Легаси-запись (без сигнатуры): считаем её нашей и дописываем sig.
+            item["sig"] = signature
             entry = item
             break
-            
+        if item_sig == signature:
+            entry = item
+            break
+
     if entry is None:
-        existing_ids = [int(item.get("id", 0)) for item in db if item.get("id")]
+        existing_ids = [int(item["id"]) for item in db
+                        if str(item.get("id", "")).isdigit()]
         next_id = max(existing_ids) + 1 if existing_ids else 1
         id_str = f"{next_id:04d}"
-        
-        name_str = base_name
-        desc_str = ""
-        stbl_entries = pkg.find(0x220557DA)
-        
-        stbl_data = None
-        for e in stbl_entries:
-            lang_byte = e.instance >> 56
-            if lang_byte == 0x12: # Russian
-                stbl_data = pkg.read_resource(e)
-                break
-        if stbl_data is None and stbl_entries:
-            for e in stbl_entries:
-                lang_byte = e.instance >> 56
-                if lang_byte == 0x00: # English (US)
-                    stbl_data = pkg.read_resource(e)
-                    break
-        if stbl_data is None and stbl_entries:
-            stbl_data = pkg.read_resource(stbl_entries[0])
-            
-        if stbl_data:
-            strings = {}
-            if len(stbl_data) >= 21 and stbl_data[:4] == b"STBL":
-                string_count = struct.unpack_from("<Q", stbl_data, 7)[0]
-                pos = 21
-                for _ in range(string_count):
-                    if pos + 7 > len(stbl_data): break
-                    key = struct.unpack_from("<I", stbl_data, pos)[0]
-                    length = struct.unpack_from("<H", stbl_data, pos+5)[0]
-                    pos += 7
-                    if pos + length > len(stbl_data): break
-                    string_bytes = stbl_data[pos:pos+length]
-                    try:
-                        val = string_bytes.decode("utf-8")
-                    except Exception:
-                        val = string_bytes.decode("latin1", errors="replace")
-                    strings[key] = val
-                    pos += length
-                    
-            if strings:
-                sorted_strings = sorted(strings.values(), key=lambda s: len(s))
-                if sorted_strings:
-                    name_str = sorted_strings[0]
-                    if len(sorted_strings) > 1:
-                        desc_str = sorted_strings[1]
-                        
+
+        if display_name:
+            # Точное имя из каталога объектов (COBJ/OBJD)
+            name_str = display_name
+            desc_str = description or ""
+        else:
+            if strings is None:
+                strings = _read_stbl_strings(pkg)
+            name_str, desc_str = _resolve_name_and_description(strings, base_name)
+        slug = (_sanitize_asset_name(name_str)
+                or _sanitize_asset_name(base_name) or "package")
+
         entry = {
             "id": id_str,
             "filename": filename,
+            "sig": signature,
             "name": name_str,
             "description": desc_str,
-            "colors": []
+            "assetName": slug,
+            "colors": [],
         }
         db.append(entry)
-        with open(db_path, "w", encoding="utf-8") as f:
-            json.dump(db, f, indent=2, ensure_ascii=False)
-            
-    return entry["id"], entry["name"], entry["description"]
+
+    # У каждой записи (в т.ч. легаси) должно быть уникальное assetName.
+    slug = (_sanitize_asset_name(
+                entry.get("assetName") or entry.get("name") or base_name)
+            or _sanitize_asset_name(base_name) or "package")
+    entry["assetName"] = _make_unique_asset_name(slug, db, out_dir,
+                                                 exclude_id=entry["id"])
+    if not entry.get("sig"):
+        entry["sig"] = signature
+
+    _save_catalog_db(db_path, db)
+    return entry
 
 
 def _classify_texture_role(name: str) -> str:
@@ -557,18 +940,51 @@ def _fracture_mesh(mesh: GeomMesh):
 def extract_package(package_path: str, opt: Options) -> dict:
     pkg = DBPF.from_file(package_path)
     base = os.path.splitext(os.path.basename(package_path))[0]
-    
+
     # Create the output directory first so the catalog can be saved inside it
     os.makedirs(opt.out_dir, exist_ok=True)
     db_path = os.path.join(opt.out_dir, "catalog_database.json")
-    id_str, name_str, desc_str = get_or_create_catalog_entry(pkg, package_path, base, db_path)
-    
-    out_root = os.path.join(opt.out_dir, f"[{id_str}] {base}")
+
+    # Каталог объектов Sims 4: имена мебели берём из самого пака
+    # (COBJ/OBJD + строковая таблица STBL), либо — для игровых паков типа
+    # ClientFullBuild0, где строк нет, — из соседних Strings_*.package
+    # (приоритет RUS -> ENG -> любой), точно как это делает сама игра.
+    strings = _read_stbl_strings(pkg)
+    external_strings = False
+    if not strings:
+        strings = _read_strings_from_sibling_packages(package_path)
+        external_strings = bool(strings)
+    families = _extract_object_families(pkg, strings)
+
+    # Однообъектный пак (обычный CC): вся папка называется по этому объекту.
+    display_name = families[0]["name"] if len(families) == 1 else None
+    description = families[0]["description"] if len(families) == 1 else None
+
+    # Название мебели берём из самого .package, а не из имени файла.
+    # asset_base уникален: при совпадении названий в разных паках добавляется
+    # суффикс (chair, chair_2, ...), так что папки и файлы разных объектов
+    # никогда не перезаписывают друг друга.
+    # Важно: строки из соседнего Strings_*.package НЕ используем для эвристики
+    # имени папки — там сотни тысяч строк всей игры, а не название этого пака.
+    catalog_entry = get_or_create_catalog_entry(pkg, package_path, base, db_path,
+                                                out_dir=opt.out_dir,
+                                                display_name=display_name,
+                                                description=description,
+                                                strings=(None if external_strings
+                                                         else strings))
+    id_str = catalog_entry["id"]
+    asset_base = catalog_entry.get("assetName") or base
+
+    out_root = os.path.join(opt.out_dir, f"[{id_str}] {asset_base}")
     os.makedirs(out_root, exist_ok=True)
 
     report = {
         "package": package_path,
         "out_dir": out_root,
+        "id": id_str,
+        "name": catalog_entry.get("name", base),
+        "asset_name": asset_base,
+        "objects": [],
         "total_resources": len(pkg.entries),
         "meshes": [],
         "textures": [],
@@ -597,7 +1013,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
         for i, e in enumerate(pkg.find(rt.GEOM)):
             try:
                 data = pkg.read_resource(e)
-                m = parse_geom(data, name=f"{base}_geom{i:02d}")
+                m = parse_geom(data, name=f"{asset_base}_geom{i:02d}")
                 if m.vertex_count and m.face_count:
                     collected.append(_to_common_mesh(m))
             except Exception as ex:
@@ -610,38 +1026,101 @@ def extract_package(package_path: str, opt: Options) -> dict:
             try:
                 data = pkg.read_resource(e)
                 rcol = RCOL(data)
-                label = f"{base}_{rt.type_name(type_id).lower()}{i:02d}"
+                label = f"{asset_base}_{rt.type_name(type_id).lower()}{i:02d}"
                 groups = parse_object_mesh(rcol, name=label, no_cas=opt.no_cas)
                 groups = [g for g in groups if g.vertex_count and g.face_count]
                 if groups:
                     total = sum(g.vertex_count for g in groups)
-                    lod_candidates.append((priority, total, groups, label, rcol))
+                    lod_candidates.append((priority, total, groups, label, rcol,
+                                           (e.type_id, e.group_id, e.instance)))
             except Exception as ex:
                 report["errors"].append(f"{rt.type_name(type_id)} {e.tgi}: {ex}")
 
     # A DBPF's physical index order and MODL/MLOD type are *not* LOD numbers.
     # In particular, an object commonly has MODL[0] and MLOD[0]; naming both
-    # resources "...lod00" made Unity put both renderers into LOD 0.  Give every
-    # successfully decoded model one global, deterministic LOD number instead:
-    # the most detailed mesh is LOD 0, followed by decreasing vertex count.
-    # This also deliberately excludes empty/shadow-only resources.
+    # resources "...lod00" made Unity put both renderers into LOD 0.
+    #
+    # Если в паке есть каталог объектов (OBJD/COBJ), каждый объект получает
+    # своё имя из каталога, а его MODL/MLOD делят один instance id и сортируются
+    # по убыванию детализации внутри объекта: "<Имя>_lod00", "<Имя>_lod01"...
+    # Разные объекты с одинаковым именем получают суффикс _2/_3 внутри пака.
+    # Ресурсы без каталога — прежняя схема "<asset_base>_lodNN".
     best_lod_label = ""
     if lod_candidates:
-        lod_candidates.sort(key=lambda c: (-c[1], c[0], c[3]))
-        if not opt.all_lods:
-            lod_candidates = [lod_candidates[0]]
+        taken_labels = set()
 
-        for lod_index, (_, _, groups, old_label, rcol_obj) in enumerate(lod_candidates):
-            lod_label = f"{base}_lod{lod_index:02d}"
-            if lod_index == 0:
-                best_lod_label = lod_label
-            for group_index, gm in enumerate(groups):
-                # parse_object_mesh has already named it <old_label>_gNN.  Do
-                # not derive a level from the per-type enumerate() index: each
-                # type starts at zero, which was the original LOD0-only bug.
-                suffix = gm.name[len(old_label):] if gm.name.startswith(old_label) else f"_g{group_index:02d}"
-                gm.name = lod_label + suffix
-                collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj))
+        def assign_labels(cands, label_base, start_index=0):
+            """Назначает мешам имена "<label_base>_lodNN[_gMM]" с учётом
+            занятых меток (чтобы не перезаписать файлы)."""
+            nonlocal best_lod_label
+            idx = start_index
+            for (_, _, groups, old_label, rcol_obj, _key) in cands:
+                while f"{label_base}_lod{idx:02d}" in taken_labels:
+                    idx += 1
+                lod_label = f"{label_base}_lod{idx:02d}"
+                idx += 1
+                taken_labels.add(lod_label)
+                if not best_lod_label:
+                    best_lod_label = lod_label
+                for group_index, gm in enumerate(groups):
+                    # parse_object_mesh has already named it <old_label>_gNN.  Do
+                    # not derive a level from the per-type enumerate() index: each
+                    # type starts at zero, which was the original LOD0-only bug.
+                    suffix = gm.name[len(old_label):] if gm.name.startswith(old_label) else f"_g{group_index:02d}"
+                    gm.name = lod_label + suffix
+                    collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj))
+
+        handled = set()
+
+        if families:
+            used_slugs = set()
+            unnamed_count = 0
+            for fam in families:
+                members = [ci for ci, c in enumerate(lod_candidates)
+                           if c[5][2] in fam["model_instances"]]
+                if not members:
+                    continue
+                slug = _sanitize_asset_name(fam.get("name") or "")
+                if not slug:
+                    slug = f"{asset_base}_obj{unnamed_count:02d}"
+                    unnamed_count += 1
+                base_slug, n = slug, 2
+                while slug in used_slugs:       # два "chair" в одном паке
+                    slug = f"{base_slug}_{n}"
+                    n += 1
+                used_slugs.add(slug)
+                fam["slug"] = slug
+
+                cands = []
+                for ci in members:
+                    handled.add(ci)
+                    cands.append(lod_candidates[ci])
+                cands.sort(key=lambda c: (-c[1], c[0], c[3]))
+                if not opt.all_lods:
+                    cands = cands[:1]
+                assign_labels(cands, slug)
+
+        # Ресурсы без каталога (или паки без OBJD вообще): старая схема,
+        # но с пропуском меток, уже занятых именованными объектами.
+        rest = [c for ci, c in enumerate(lod_candidates) if ci not in handled]
+        rest.sort(key=lambda c: (-c[1], c[0], c[3]))
+        if not opt.all_lods:
+            rest = rest[:1]
+        assign_labels(rest, asset_base)
+
+    # Уникальные имена объектов пака -> в запись каталога (поле "objects").
+    if families:
+        try:
+            db_objects = [{
+                "name": fam.get("name"),
+                "assetName": fam.get("slug"),
+                "description": fam.get("description"),
+                "price": fam.get("price"),
+            } for fam in families if fam.get("slug")]
+            _update_catalog_objects(db_path, id_str, db_objects)
+            report["objects"] = db_objects
+        except Exception:
+            pass
 
     mesh_records = []
     part_records = []
@@ -736,7 +1215,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
         for i, e in enumerate(tex_entries):
             try:
                 data = pkg.read_resource(e)
-                name = f"{base}_tex{i:02d}"
+                name = f"{asset_base}_tex{i:02d}"
                 p = os.path.join(out_root, name + ".png")
                 status = textures.save_as_png(data, p)
                 png_files.append(p)
@@ -839,7 +1318,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
 
             for mi, diffuse in enumerate(palette_diffuses):
                 suffix = f"swatch{mi:02d}"
-                mat_name = f"{base}_{suffix}_material"
+                mat_name = f"{asset_base}_{suffix}_material"
                 mat_path = os.path.join(out_root, mat_name + ".mat")
                 unity.write_material(
                     mat_path, mat_name, pipeline=opt.mat_pipeline,
@@ -931,9 +1410,8 @@ def extract_package(package_path: str, opt: Options) -> dict:
             try:
                 with open(db_path, "r", encoding="utf-8") as f:
                     db = json.load(f)
-                filename = os.path.basename(package_path)
                 for item in db:
-                    if item.get("filename") == filename:
+                    if item.get("id") == id_str:
                         swatches_found = []
                         seen_mat_names = set()
 
