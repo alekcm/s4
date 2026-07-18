@@ -1467,7 +1467,8 @@ def extract_package(package_path: str, opt: Options) -> dict:
         if mesh_records and (material_texture_pairs or opt.colliders):
             # One runtime script per export (unique GUID) so the prefab can
             # carry an S4Identity component without a GUID clash between packs.
-            identity_guid = unity.write_s4identity_script(out_root, id_str, asset_base)
+            identity_guid = unity.write_s4identity_script(out_root, id_str, asset_base,
+                                                          shared_scripts_dir=opt.out_dir)
             try:
                 identity_id_int = int(id_str)
             except Exception:
