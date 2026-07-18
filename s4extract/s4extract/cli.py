@@ -13,9 +13,7 @@ Options:
     --raw             also dump every raw resource
     --pipeline NAME   unity render pipeline (builtin|urp|hdrp), default builtin
     --no-colliders    do not generate convex collider meshes
-    --prefab          (no-op / legacy) the final <name>_READY.prefab with
-                      LODGroup + shared materials + LOD0 colliders is now
-                      generated automatically — no Unity "Fix" step needed
+    --prefab          generate legacy YAML .prefab files
     --static          make prefab static (no Rigidbody)
     --max-hulls N     max convex parts per object (default 128)
     --all-lods        export every LOD (default: only the highest-detail one)

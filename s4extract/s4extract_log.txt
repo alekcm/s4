@@ -1,6 +1,6 @@
 ======================================== 
  s4extract HDRP launcher 
- Time: 17.07.2026 23:42:37,21 
+ Time: 18.07.2026 18:50:38,55 
  Working dir: A:\s4extract 
 ======================================== 
  
@@ -9,7 +9,7 @@ Python 3.13.7
 Python location: 
 C:\Windows\py.exe
  
-Input file: C:\Users\Алекс\Desktop\1.package 
+Input file: C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package 
 Input exists: 
 YES 
  
@@ -29,153 +29,153 @@ vhacdx: OK
 Dependencies check complete 
  
 [3/4] Starting extraction... 
-File: C:\Users\Алекс\Desktop\1.package 
+File: C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package 
  
 
-=== C:\Users\Алекс\Desktop\1.package ===
-  -> extracted\[0002] Arrrmless Dining Chair
+=== C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package ===
+  -> extracted\[0001] chair
   resources: 131
-  mesh  Arrrmless Dining Chair_lod00_g01: 829 verts, 730 faces -> Arrrmless Dining Chair_lod00_g01.obj, Arrrmless Dining Chair_lod00_g01.fbx
-  mesh  Arrrmless Dining Chair_lod01_g01: 454 verts, 338 faces -> Arrrmless Dining Chair_lod01_g01.obj, Arrrmless Dining Chair_lod01_g01.fbx
-  mesh  Arrrmless Dining Chair_lod02_g01: 281 verts, 178 faces -> Arrrmless Dining Chair_lod02_g01.obj, Arrrmless Dining Chair_lod02_g01.fbx
-  tex   Arrrmless Dining Chair_tex00.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex01.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex02.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex03.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex04.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex05.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex06.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex07.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex08.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex09.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex10.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex11.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex12.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex13.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex14.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex15.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex16.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex17.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex18.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex19.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex20.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex21.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex22.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex23.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex24.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex25.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex26.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex27.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex28.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex29.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex30.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex31.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex32.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex33.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex34.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex35.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   Arrrmless Dining Chair_tex36.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  mat   Arrrmless Dining Chair_lod00_g01_swatch00_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex00.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch01_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex03.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch02_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex04.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch03_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex05.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch04_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex06.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch05_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex07.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch06_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex08.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch07_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex09.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch08_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex10.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch09_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex11.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch10_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex13.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch11_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex14.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch12_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex15.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch13_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex16.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch14_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex17.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch15_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex18.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch16_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex19.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch17_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex20.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch18_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex21.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch19_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex22.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch20_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex23.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch21_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex24.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch22_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex25.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch23_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex26.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch24_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex27.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch25_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex28.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch26_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex29.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch27_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex30.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch28_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex31.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch29_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex32.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch30_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex33.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch31_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex34.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch32_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex35.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod00_g01_swatch33_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex36.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch00_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex00.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch01_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex03.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch02_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex04.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch03_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex05.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch04_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex06.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch05_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex07.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch06_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex08.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch07_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex09.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch08_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex10.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch09_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex11.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch10_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex13.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch11_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex14.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch12_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex15.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch13_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex16.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch14_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex17.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch15_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex18.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch16_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex19.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch17_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex20.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch18_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex21.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch19_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex22.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch20_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex23.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch21_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex24.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch22_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex25.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch23_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex26.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch24_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex27.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch25_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex28.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch26_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex29.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch27_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex30.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch28_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex31.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch29_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex32.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch30_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex33.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch31_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex34.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch32_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex35.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod01_g01_swatch33_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex36.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch00_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex00.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch01_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex03.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch02_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex04.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch03_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex05.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch04_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex06.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch05_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex07.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch06_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex08.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch07_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex09.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch08_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex10.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch09_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex12.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch10_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex13.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch11_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex14.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch12_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex15.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch13_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex16.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch14_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex17.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch15_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex18.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch16_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex19.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch17_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex20.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch18_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex21.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch19_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex22.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch20_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex23.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch21_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex24.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch22_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex25.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch23_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex26.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch24_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex27.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch25_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex28.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch26_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex29.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch27_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex30.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch28_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex31.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch29_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex32.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch30_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex33.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch31_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex34.png, normal=Arrrmless Dining Chair_tex01.png)
-  mat   Arrrmless Dining Chair_lod02_g01_swatch32_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex35.png, normal=Arrrmless Dining Chair_tex01.png)
+  mesh  chair_lod00_g01: 829 verts, 730 faces -> chair_lod00_g01.obj, chair_lod00_g01.fbx
+  mesh  chair_lod01_g01: 454 verts, 338 faces -> chair_lod01_g01.obj, chair_lod01_g01.fbx
+  mesh  chair_lod02_g01: 281 verts, 178 faces -> chair_lod02_g01.obj, chair_lod02_g01.fbx
+  tex   chair_tex00.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex01.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex02.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex03.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex04.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex05.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex06.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex07.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex08.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex09.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex10.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex11.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex12.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex13.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex14.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex15.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex16.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex17.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex18.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex19.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex20.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex21.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex22.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex23.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex24.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex25.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex26.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex27.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex28.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex29.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex30.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex31.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex32.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex33.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex34.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex35.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   chair_tex36.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  mat   chair_lod00_g01_swatch00_material.mat [hdrp] (diffuse=chair_tex00.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch01_material.mat [hdrp] (diffuse=chair_tex03.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch02_material.mat [hdrp] (diffuse=chair_tex04.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch03_material.mat [hdrp] (diffuse=chair_tex05.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch04_material.mat [hdrp] (diffuse=chair_tex06.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch05_material.mat [hdrp] (diffuse=chair_tex07.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch06_material.mat [hdrp] (diffuse=chair_tex08.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch07_material.mat [hdrp] (diffuse=chair_tex09.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch08_material.mat [hdrp] (diffuse=chair_tex10.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch09_material.mat [hdrp] (diffuse=chair_tex11.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch10_material.mat [hdrp] (diffuse=chair_tex13.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch11_material.mat [hdrp] (diffuse=chair_tex14.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch12_material.mat [hdrp] (diffuse=chair_tex15.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch13_material.mat [hdrp] (diffuse=chair_tex16.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch14_material.mat [hdrp] (diffuse=chair_tex17.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch15_material.mat [hdrp] (diffuse=chair_tex18.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch16_material.mat [hdrp] (diffuse=chair_tex19.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch17_material.mat [hdrp] (diffuse=chair_tex20.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch18_material.mat [hdrp] (diffuse=chair_tex21.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch19_material.mat [hdrp] (diffuse=chair_tex22.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch20_material.mat [hdrp] (diffuse=chair_tex23.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch21_material.mat [hdrp] (diffuse=chair_tex24.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch22_material.mat [hdrp] (diffuse=chair_tex25.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch23_material.mat [hdrp] (diffuse=chair_tex26.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch24_material.mat [hdrp] (diffuse=chair_tex27.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch25_material.mat [hdrp] (diffuse=chair_tex28.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch26_material.mat [hdrp] (diffuse=chair_tex29.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch27_material.mat [hdrp] (diffuse=chair_tex30.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch28_material.mat [hdrp] (diffuse=chair_tex31.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch29_material.mat [hdrp] (diffuse=chair_tex32.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch30_material.mat [hdrp] (diffuse=chair_tex33.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch31_material.mat [hdrp] (diffuse=chair_tex34.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch32_material.mat [hdrp] (diffuse=chair_tex35.png, normal=chair_tex01.png)
+  mat   chair_lod00_g01_swatch33_material.mat [hdrp] (diffuse=chair_tex36.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch00_material.mat [hdrp] (diffuse=chair_tex00.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch01_material.mat [hdrp] (diffuse=chair_tex03.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch02_material.mat [hdrp] (diffuse=chair_tex04.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch03_material.mat [hdrp] (diffuse=chair_tex05.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch04_material.mat [hdrp] (diffuse=chair_tex06.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch05_material.mat [hdrp] (diffuse=chair_tex07.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch06_material.mat [hdrp] (diffuse=chair_tex08.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch07_material.mat [hdrp] (diffuse=chair_tex09.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch08_material.mat [hdrp] (diffuse=chair_tex10.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch09_material.mat [hdrp] (diffuse=chair_tex11.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch10_material.mat [hdrp] (diffuse=chair_tex13.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch11_material.mat [hdrp] (diffuse=chair_tex14.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch12_material.mat [hdrp] (diffuse=chair_tex15.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch13_material.mat [hdrp] (diffuse=chair_tex16.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch14_material.mat [hdrp] (diffuse=chair_tex17.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch15_material.mat [hdrp] (diffuse=chair_tex18.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch16_material.mat [hdrp] (diffuse=chair_tex19.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch17_material.mat [hdrp] (diffuse=chair_tex20.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch18_material.mat [hdrp] (diffuse=chair_tex21.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch19_material.mat [hdrp] (diffuse=chair_tex22.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch20_material.mat [hdrp] (diffuse=chair_tex23.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch21_material.mat [hdrp] (diffuse=chair_tex24.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch22_material.mat [hdrp] (diffuse=chair_tex25.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch23_material.mat [hdrp] (diffuse=chair_tex26.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch24_material.mat [hdrp] (diffuse=chair_tex27.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch25_material.mat [hdrp] (diffuse=chair_tex28.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch26_material.mat [hdrp] (diffuse=chair_tex29.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch27_material.mat [hdrp] (diffuse=chair_tex30.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch28_material.mat [hdrp] (diffuse=chair_tex31.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch29_material.mat [hdrp] (diffuse=chair_tex32.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch30_material.mat [hdrp] (diffuse=chair_tex33.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch31_material.mat [hdrp] (diffuse=chair_tex34.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch32_material.mat [hdrp] (diffuse=chair_tex35.png, normal=chair_tex01.png)
+  mat   chair_lod01_g01_swatch33_material.mat [hdrp] (diffuse=chair_tex36.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch00_material.mat [hdrp] (diffuse=chair_tex00.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch01_material.mat [hdrp] (diffuse=chair_tex03.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch02_material.mat [hdrp] (diffuse=chair_tex04.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch03_material.mat [hdrp] (diffuse=chair_tex05.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch04_material.mat [hdrp] (diffuse=chair_tex06.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch05_material.mat [hdrp] (diffuse=chair_tex07.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch06_material.mat [hdrp] (diffuse=chair_tex08.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch07_material.mat [hdrp] (diffuse=chair_tex09.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch08_material.mat [hdrp] (diffuse=chair_tex10.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch09_material.mat [hdrp] (diffuse=chair_tex12.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch10_material.mat [hdrp] (diffuse=chair_tex13.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch11_material.mat [hdrp] (diffuse=chair_tex14.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch12_material.mat [hdrp] (diffuse=chair_tex15.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch13_material.mat [hdrp] (diffuse=chair_tex16.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch14_material.mat [hdrp] (diffuse=chair_tex17.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch15_material.mat [hdrp] (diffuse=chair_tex18.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch16_material.mat [hdrp] (diffuse=chair_tex19.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch17_material.mat [hdrp] (diffuse=chair_tex20.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch18_material.mat [hdrp] (diffuse=chair_tex21.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch19_material.mat [hdrp] (diffuse=chair_tex22.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch20_material.mat [hdrp] (diffuse=chair_tex23.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch21_material.mat [hdrp] (diffuse=chair_tex24.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch22_material.mat [hdrp] (diffuse=chair_tex25.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch23_material.mat [hdrp] (diffuse=chair_tex26.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch24_material.mat [hdrp] (diffuse=chair_tex27.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch25_material.mat [hdrp] (diffuse=chair_tex28.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch26_material.mat [hdrp] (diffuse=chair_tex29.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch27_material.mat [hdrp] (diffuse=chair_tex30.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch28_material.mat [hdrp] (diffuse=chair_tex31.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch29_material.mat [hdrp] (diffuse=chair_tex32.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch30_material.mat [hdrp] (diffuse=chair_tex33.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch31_material.mat [hdrp] (diffuse=chair_tex34.png, normal=chair_tex01.png)
+  mat   chair_lod02_g01_swatch32_material.mat [hdrp] (diffuse=chair_tex35.png, normal=chair_tex01.png)
   mat   ../S4Extract_Data/Editor/S4ExtractBatchFixer.cs [hdrp] (diffuse=None, normal=None)
 
 Done. 1 package(s), 3 mesh(es), 37 texture(s).
