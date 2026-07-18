@@ -1201,21 +1201,50 @@ def extract_package(package_path: str, opt: Options) -> dict:
             entry["files"].append(os.path.basename(fbx_path))
         report["meshes"].append(entry)
 
-        parts = _group_parts_semantically(name, positions, normals, uvs, faces, min_faces_per_part=10) if opt.parts_prefab else []
+        # Нарезка на детали (для convex mesh collider) — только для LOD0.
+        # Остальные LOD'ы экспортируются как целые модели для отрисовки.
+        _lod_idx = get_lod_index(name)
+        _should_slice = _lod_idx in (-1, 0)  # -1 = неизвестный LOD (считаем LOD0), 0 = LOD0
         part_asset_names = []
-        if parts and len(parts) > 1:
-            for part in parts:
-                capped_part = close_open_boundaries(part)
-                pobj = os.path.join(mesh_dir, capped_part.name + ".obj")
-                write_obj(capped_part, pobj)
-                part_asset_names.append(capped_part.name)
+        if _should_slice:
+            parts = _group_parts_semantically(name, positions, normals, uvs, faces, min_faces_per_part=10) if opt.parts_prefab else []
+            if parts and len(parts) > 1:
+                for part in parts:
+                    capped_part = close_open_boundaries(part)
+                    pobj = os.path.join(mesh_dir, capped_part.name + ".obj")
+                    write_obj(capped_part, pobj)
+                    part_asset_names.append(capped_part.name)
+                    part_records.append({
+                        "asset_name": capped_part.name,
+                        "mesh_name": name,
+                        "positions": capped_part.positions,
+                        "faces": capped_part.faces,
+                    })
+                    broken = _fracture_mesh(capped_part)
+                    broken_asset_names = []
+                    for bp in broken:
+                        bp_path = os.path.join(mesh_dir, bp.name + ".obj")
+                        write_obj(bp, bp_path)
+                        broken_asset_names.append(bp.name)
+                    if broken_asset_names:
+                        break_specs.append({
+                            "intact_asset_name": capped_part.name,
+                            "mesh_name": name,
+                            "broken_asset_names": broken_asset_names,
+                        })
+            else:
+                base_part = close_open_boundaries(gm)
+                if opt.obj:
+                    p = os.path.join(mesh_dir, name + ".obj")
+                    write_obj(base_part, p)
+                part_asset_names.append(name)
                 part_records.append({
-                    "asset_name": capped_part.name,
+                    "asset_name": name,
                     "mesh_name": name,
-                    "positions": capped_part.positions,
-                    "faces": capped_part.faces,
+                    "positions": base_part.positions,
+                    "faces": base_part.faces,
                 })
-                broken = _fracture_mesh(capped_part)
+                broken = _fracture_mesh(base_part)
                 broken_asset_names = []
                 for bp in broken:
                     bp_path = os.path.join(mesh_dir, bp.name + ".obj")
@@ -1223,34 +1252,10 @@ def extract_package(package_path: str, opt: Options) -> dict:
                     broken_asset_names.append(bp.name)
                 if broken_asset_names:
                     break_specs.append({
-                        "intact_asset_name": capped_part.name,
+                        "intact_asset_name": name,
                         "mesh_name": name,
                         "broken_asset_names": broken_asset_names,
                     })
-        else:
-            base_part = close_open_boundaries(gm)
-            if opt.obj:
-                p = os.path.join(mesh_dir, name + ".obj")
-                write_obj(base_part, p)
-            part_asset_names.append(name)
-            part_records.append({
-                "asset_name": name,
-                "mesh_name": name,
-                "positions": base_part.positions,
-                "faces": base_part.faces,
-            })
-            broken = _fracture_mesh(base_part)
-            broken_asset_names = []
-            for bp in broken:
-                bp_path = os.path.join(mesh_dir, bp.name + ".obj")
-                write_obj(bp, bp_path)
-                broken_asset_names.append(bp.name)
-            if broken_asset_names:
-                break_specs.append({
-                    "intact_asset_name": name,
-                    "mesh_name": name,
-                    "broken_asset_names": broken_asset_names,
-                })
 
         mesh_records.append({
             "name": name,
