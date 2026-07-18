@@ -646,6 +646,15 @@ def extract_package(package_path: str, opt: Options) -> dict:
     mesh_records = []
     part_records = []
     break_specs = []
+    # Only LOD0 is used for breakable-part/collider geometry. Other LODs
+    # remain intact visual meshes.
+    def _lod_index(mesh_name):
+        marker = "_lod"
+        at = mesh_name.lower().rfind(marker)
+        if at < 0: return -1
+        digits = mesh_name[at + len(marker):]
+        digits = digits.split("_", 1)[0]
+        return int(digits) if digits.isdigit() else -1
     for idx, rec in enumerate(collected):
         positions = rec["positions"]
         normals = rec["normals"]
@@ -667,7 +676,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
             entry["files"].append(os.path.basename(fbx_path))
         report["meshes"].append(entry)
 
-        parts = _group_parts_semantically(name, positions, normals, uvs, faces, min_faces_per_part=10) if opt.parts_prefab else []
+        parts = _group_parts_semantically(name, positions, normals, uvs, faces, min_faces_per_part=10) if opt.parts_prefab and _lod_index(name) == 0 else []
         part_asset_names = []
         if parts and len(parts) > 1:
             for part in parts:
@@ -693,7 +702,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
                         "mesh_name": name,
                         "broken_asset_names": broken_asset_names,
                     })
-        else:
+        elif _lod_index(name) == 0:
             base_part = close_open_boundaries(gm)
             if opt.obj:
                 p = os.path.join(out_root, name + ".obj")
@@ -762,7 +771,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
         for rec in mesh_records:
             if rec.get("rcol") is None or rec.get("material_ref") is None:
                 continue
-            fam_key = (id(rec["rcol"]), rec["material_ref"])
+            fam_key = rec["material_ref"]
             if fam_key not in families:
                 families[fam_key] = {
                     "label": rec["name"],
@@ -812,7 +821,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 family_names[fam_key] = names
 
         for rec in mesh_records:
-            fam_key = (id(rec.get("rcol")), rec.get("material_ref"))
+            fam_key = rec.get("material_ref")
             if fam_key in family_guids:
                 mesh_material_guid_by_name[rec["name"]] = family_guids[fam_key][0]
                 mesh_material_name_by_name[rec["name"]] = family_names[fam_key][0]
@@ -1077,6 +1086,10 @@ def extract_package(package_path: str, opt: Options) -> dict:
     if (opt.colliders or opt.prefab):
         for rec in mesh_records:
             name = rec["name"]
+            # Convex collider meshes are generated only from LOD0. LOD1+
+            # are visual-only and must stay as intact meshes.
+            if _lod_index(name) != 0:
+                continue
             cset = None
             collider_guids = []
             if opt.colliders:

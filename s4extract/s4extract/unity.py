@@ -1067,7 +1067,7 @@ public static class {class_name}
             // its implicit Culled range after the last positive threshold and
             // makes the object disappear at distance.
             LOD[] lods = new LOD[keys.Count];
-            float[] screenHeights = new float[] {{ 0.5f, 0.15f, 0.05f, 0.01f }};
+            float[] screenHeights = new float[] {{ 0.5f, 0.25f, 0.10f, 0.01f }};
             
             for (int i = 0; i < keys.Count; i++)
             {{
@@ -1983,7 +1983,7 @@ public static class S4ExtractBatchFixer
             // its implicit Culled range after the last positive threshold and
             // makes the object disappear at distance.
             LOD[] lods = new LOD[keys.Count];
-            float[] screenHeights = new float[] {{ 0.5f, 0.15f, 0.05f, 0.01f }};
+            float[] screenHeights = new float[] {{ 0.5f, 0.25f, 0.10f, 0.01f }};
             
             for (int i = 0; i < keys.Count; i++)
             {{

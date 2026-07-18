@@ -1,6 +1,6 @@
 ======================================== 
  s4extract HDRP launcher 
- Time: 18.07.2026 18:50:38,55 
+ Time: 18.07.2026 19:23:21,61 
  Working dir: A:\s4extract 
 ======================================== 
  
@@ -9,7 +9,7 @@ Python 3.13.7
 Python location: 
 C:\Windows\py.exe
  
-Input file: C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package 
+Input file: C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-One Styling Station\model.package 
 Input exists: 
 YES 
  
@@ -29,156 +29,55 @@ vhacdx: OK
 Dependencies check complete 
  
 [3/4] Starting extraction... 
-File: C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package 
+File: C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-One Styling Station\model.package 
  
 
-=== C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package ===
-  -> extracted\[0001] chair
-  resources: 131
-  mesh  chair_lod00_g01: 829 verts, 730 faces -> chair_lod00_g01.obj, chair_lod00_g01.fbx
-  mesh  chair_lod01_g01: 454 verts, 338 faces -> chair_lod01_g01.obj, chair_lod01_g01.fbx
-  mesh  chair_lod02_g01: 281 verts, 178 faces -> chair_lod02_g01.obj, chair_lod02_g01.fbx
-  tex   chair_tex00.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex01.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex02.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex03.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex04.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex05.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex06.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex07.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex08.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex09.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex10.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex11.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex12.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex13.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex14.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex15.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex16.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex17.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex18.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex19.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex20.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex21.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex22.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex23.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex24.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex25.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex26.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex27.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex28.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex29.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex30.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex31.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex32.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex33.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex34.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex35.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   chair_tex36.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  mat   chair_lod00_g01_swatch00_material.mat [hdrp] (diffuse=chair_tex00.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch01_material.mat [hdrp] (diffuse=chair_tex03.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch02_material.mat [hdrp] (diffuse=chair_tex04.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch03_material.mat [hdrp] (diffuse=chair_tex05.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch04_material.mat [hdrp] (diffuse=chair_tex06.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch05_material.mat [hdrp] (diffuse=chair_tex07.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch06_material.mat [hdrp] (diffuse=chair_tex08.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch07_material.mat [hdrp] (diffuse=chair_tex09.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch08_material.mat [hdrp] (diffuse=chair_tex10.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch09_material.mat [hdrp] (diffuse=chair_tex11.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch10_material.mat [hdrp] (diffuse=chair_tex13.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch11_material.mat [hdrp] (diffuse=chair_tex14.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch12_material.mat [hdrp] (diffuse=chair_tex15.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch13_material.mat [hdrp] (diffuse=chair_tex16.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch14_material.mat [hdrp] (diffuse=chair_tex17.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch15_material.mat [hdrp] (diffuse=chair_tex18.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch16_material.mat [hdrp] (diffuse=chair_tex19.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch17_material.mat [hdrp] (diffuse=chair_tex20.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch18_material.mat [hdrp] (diffuse=chair_tex21.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch19_material.mat [hdrp] (diffuse=chair_tex22.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch20_material.mat [hdrp] (diffuse=chair_tex23.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch21_material.mat [hdrp] (diffuse=chair_tex24.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch22_material.mat [hdrp] (diffuse=chair_tex25.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch23_material.mat [hdrp] (diffuse=chair_tex26.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch24_material.mat [hdrp] (diffuse=chair_tex27.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch25_material.mat [hdrp] (diffuse=chair_tex28.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch26_material.mat [hdrp] (diffuse=chair_tex29.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch27_material.mat [hdrp] (diffuse=chair_tex30.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch28_material.mat [hdrp] (diffuse=chair_tex31.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch29_material.mat [hdrp] (diffuse=chair_tex32.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch30_material.mat [hdrp] (diffuse=chair_tex33.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch31_material.mat [hdrp] (diffuse=chair_tex34.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch32_material.mat [hdrp] (diffuse=chair_tex35.png, normal=chair_tex01.png)
-  mat   chair_lod00_g01_swatch33_material.mat [hdrp] (diffuse=chair_tex36.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch00_material.mat [hdrp] (diffuse=chair_tex00.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch01_material.mat [hdrp] (diffuse=chair_tex03.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch02_material.mat [hdrp] (diffuse=chair_tex04.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch03_material.mat [hdrp] (diffuse=chair_tex05.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch04_material.mat [hdrp] (diffuse=chair_tex06.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch05_material.mat [hdrp] (diffuse=chair_tex07.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch06_material.mat [hdrp] (diffuse=chair_tex08.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch07_material.mat [hdrp] (diffuse=chair_tex09.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch08_material.mat [hdrp] (diffuse=chair_tex10.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch09_material.mat [hdrp] (diffuse=chair_tex11.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch10_material.mat [hdrp] (diffuse=chair_tex13.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch11_material.mat [hdrp] (diffuse=chair_tex14.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch12_material.mat [hdrp] (diffuse=chair_tex15.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch13_material.mat [hdrp] (diffuse=chair_tex16.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch14_material.mat [hdrp] (diffuse=chair_tex17.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch15_material.mat [hdrp] (diffuse=chair_tex18.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch16_material.mat [hdrp] (diffuse=chair_tex19.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch17_material.mat [hdrp] (diffuse=chair_tex20.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch18_material.mat [hdrp] (diffuse=chair_tex21.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch19_material.mat [hdrp] (diffuse=chair_tex22.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch20_material.mat [hdrp] (diffuse=chair_tex23.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch21_material.mat [hdrp] (diffuse=chair_tex24.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch22_material.mat [hdrp] (diffuse=chair_tex25.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch23_material.mat [hdrp] (diffuse=chair_tex26.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch24_material.mat [hdrp] (diffuse=chair_tex27.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch25_material.mat [hdrp] (diffuse=chair_tex28.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch26_material.mat [hdrp] (diffuse=chair_tex29.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch27_material.mat [hdrp] (diffuse=chair_tex30.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch28_material.mat [hdrp] (diffuse=chair_tex31.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch29_material.mat [hdrp] (diffuse=chair_tex32.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch30_material.mat [hdrp] (diffuse=chair_tex33.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch31_material.mat [hdrp] (diffuse=chair_tex34.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch32_material.mat [hdrp] (diffuse=chair_tex35.png, normal=chair_tex01.png)
-  mat   chair_lod01_g01_swatch33_material.mat [hdrp] (diffuse=chair_tex36.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch00_material.mat [hdrp] (diffuse=chair_tex00.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch01_material.mat [hdrp] (diffuse=chair_tex03.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch02_material.mat [hdrp] (diffuse=chair_tex04.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch03_material.mat [hdrp] (diffuse=chair_tex05.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch04_material.mat [hdrp] (diffuse=chair_tex06.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch05_material.mat [hdrp] (diffuse=chair_tex07.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch06_material.mat [hdrp] (diffuse=chair_tex08.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch07_material.mat [hdrp] (diffuse=chair_tex09.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch08_material.mat [hdrp] (diffuse=chair_tex10.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch09_material.mat [hdrp] (diffuse=chair_tex12.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch10_material.mat [hdrp] (diffuse=chair_tex13.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch11_material.mat [hdrp] (diffuse=chair_tex14.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch12_material.mat [hdrp] (diffuse=chair_tex15.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch13_material.mat [hdrp] (diffuse=chair_tex16.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch14_material.mat [hdrp] (diffuse=chair_tex17.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch15_material.mat [hdrp] (diffuse=chair_tex18.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch16_material.mat [hdrp] (diffuse=chair_tex19.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch17_material.mat [hdrp] (diffuse=chair_tex20.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch18_material.mat [hdrp] (diffuse=chair_tex21.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch19_material.mat [hdrp] (diffuse=chair_tex22.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch20_material.mat [hdrp] (diffuse=chair_tex23.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch21_material.mat [hdrp] (diffuse=chair_tex24.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch22_material.mat [hdrp] (diffuse=chair_tex25.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch23_material.mat [hdrp] (diffuse=chair_tex26.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch24_material.mat [hdrp] (diffuse=chair_tex27.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch25_material.mat [hdrp] (diffuse=chair_tex28.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch26_material.mat [hdrp] (diffuse=chair_tex29.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch27_material.mat [hdrp] (diffuse=chair_tex30.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch28_material.mat [hdrp] (diffuse=chair_tex31.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch29_material.mat [hdrp] (diffuse=chair_tex32.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch30_material.mat [hdrp] (diffuse=chair_tex33.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch31_material.mat [hdrp] (diffuse=chair_tex34.png, normal=chair_tex01.png)
-  mat   chair_lod02_g01_swatch32_material.mat [hdrp] (diffuse=chair_tex35.png, normal=chair_tex01.png)
+=== C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-One Styling Station\model.package ===
+  -> extracted\[0001] model
+  resources: 60
+  mesh  model_lod00_g01: 2013 verts, 1585 faces -> model_lod00_g01.obj, model_lod00_g01.fbx
+  mesh  model_lod00_g02: 579 verts, 387 faces -> model_lod00_g02.obj, model_lod00_g02.fbx
+  mesh  model_lod01_g01: 1296 verts, 821 faces -> model_lod01_g01.obj, model_lod01_g01.fbx
+  mesh  model_lod01_g02: 294 verts, 184 faces -> model_lod01_g02.obj, model_lod01_g02.fbx
+  tex   model_tex00.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex01.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex02.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex03.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex04.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex05.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex06.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex07.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex08.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex09.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex10.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex11.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex12.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex13.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex14.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   model_tex15.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  mat   model_lod00_g01_swatch00_material.mat [hdrp] (diffuse=model_tex00.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch01_material.mat [hdrp] (diffuse=model_tex03.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch02_material.mat [hdrp] (diffuse=model_tex04.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch03_material.mat [hdrp] (diffuse=model_tex05.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch04_material.mat [hdrp] (diffuse=model_tex06.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch05_material.mat [hdrp] (diffuse=model_tex07.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch06_material.mat [hdrp] (diffuse=model_tex08.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch07_material.mat [hdrp] (diffuse=model_tex09.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch08_material.mat [hdrp] (diffuse=model_tex10.png, normal=model_tex01.png)
+  mat   model_lod00_g01_swatch09_material.mat [hdrp] (diffuse=model_tex11.png, normal=model_tex01.png)
+  mat   model_lod00_g02_swatch00_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch01_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch02_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch03_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch04_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch05_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch06_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch07_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch08_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+  mat   model_lod00_g02_swatch09_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
   mat   ../S4Extract_Data/Editor/S4ExtractBatchFixer.cs [hdrp] (diffuse=None, normal=None)
 
-Done. 1 package(s), 3 mesh(es), 37 texture(s).
+Done. 1 package(s), 4 mesh(es), 16 texture(s).
  
 ======================================== 
 Finished. Exit code: 0 
