@@ -37,6 +37,13 @@ public sealed class S4ColliderOptimizer : EditorWindow
     [SerializeField] float contactEpsilon = 0.003f;
     [SerializeField, Range(0f, 20f)]    float maxAxisAngle = 6f;
     [SerializeField] bool includeInactive = false;
+    // Batch mode may use a deliberately conservative last-resort box for a
+    // convex hull that is too irregular for the normal fit thresholds.  The
+    // interactive tool remains strict, so a bad automatic box is never
+    // silently created when optimizing a selected object.
+    bool allowLowFillFallback;
+    bool allowRelaxedBatchPrimitives;
+    const float LowFillFallback = 0.18f;
 
     [MenuItem("Tools/S4 Extract/Collider Optimizer")]
     static void Open() => GetWindow<S4ColliderOptimizer>("S4 Collider Optimizer");
@@ -56,7 +63,11 @@ public sealed class S4ColliderOptimizer : EditorWindow
             // produces nothing, walk the fill down so that curved/cylinder-ish
             // Sims pieces still get simplified rather than left as expensive
             // convex MeshColliders.
-            float[] fillTries = new[] { minimumBoxFill, 0.40f, 0.35f, 0.28f };
+            // Do not progressively lower this threshold in batch mode.  A low
+            // fill box is especially harmful on curved chair backs: it creates
+            // flat shelves and gaps where a ball can settle.  Such hulls are
+            // intentionally left as their original convex MeshCollider.
+            float[] fillTries = new[] { minimumBoxFill };
             float usedFill = minimumBoxFill;
             string lastResult = null;
             foreach (float f in fillTries)
@@ -74,6 +85,10 @@ public sealed class S4ColliderOptimizer : EditorWindow
                 worker.contactEpsilon = gapEpsilon;
                 worker.maxAxisAngle = axisAngle;
                 worker.includeInactive = true;
+                // Keep irregular/curved hulls as convex MeshColliders instead
+                // of forcing a flat fallback box.
+                worker.allowLowFillFallback = false;
+                worker.allowRelaxedBatchPrimitives = true;
                 lastResult = worker.OptimizeRoot(root, false);
                 // OptimizeRoot returns a sentence like "... replaced N by B boxes ...".
                 // If it produced any replacements we are done.
@@ -123,6 +138,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
                     string n = mc.sharedMesh.name;
                     if (n.StartsWith("cyl_") || n.StartsWith("hemi") || n.StartsWith("cone") ||
                         n.StartsWith("tcony_") || n.StartsWith("sphere_"))
+                        primitives++;
+                    else if (n.StartsWith("s4_lowpoly_"))
                         primitives++;
                 }
             }
@@ -197,7 +214,9 @@ public sealed class S4ColliderOptimizer : EditorWindow
         if (root == null) return new List<MeshCollider>();
         return root.GetComponentsInChildren<MeshCollider>(includeInactive)
             .Where(c => c != null && c.sharedMesh != null && c.convex &&
-                        !c.sharedMesh.name.Contains("parametric_keep") &&
+                        // Batch mode must consume every original convex hull;
+                        // even meshes marked parametric_keep are handled by the
+                        // primitive/segmented fallback instead of surviving.
                         c.transform.name != GeneratedRootName &&
                         (c.transform.parent == null || c.transform.parent.name != GeneratedRootName) &&
                         (!enabledOnly || c.enabled) &&
@@ -322,6 +341,7 @@ public sealed class S4ColliderOptimizer : EditorWindow
         var capsules = new List<CapsuleFit>();
         var spheres = new List<SphereFit>();
         var primitives = new List<S4PrimitiveFitters.PrimitiveFit>();
+        var lowPolyHulls = new List<LowPolyFit>();
         var disabled = new HashSet<MeshCollider>();
 
         // Pick best primitive per source hull, choosing whichever parametric shape
@@ -336,6 +356,7 @@ public sealed class S4ColliderOptimizer : EditorWindow
                 float bestFill = -1f;
                 object bestFit = null;
                 string bestKind = null;
+                bool capsulePreferred = false;
 
                 SphereFit sphere = null;
                 if (preferSpheres && TryFitSphere(root.transform, mc, out sphere) && IsSphereCandidate(sphere))
@@ -344,9 +365,22 @@ public sealed class S4ColliderOptimizer : EditorWindow
                 }
 
                 CapsuleFit capsule = null;
-                if (preferSmoothCapsules && TryFitCapsule(root.transform, mc, out capsule) && IsCapsuleCandidate(capsule))
+                if (preferSmoothCapsules && TryFitCapsule(root.transform, mc, out capsule))
                 {
-                    if (capsule.fill > bestFill) { bestFill = capsule.fill; bestFit = capsule; bestKind = "capsule"; }
+                    bool normalCapsule = IsCapsuleCandidate(capsule);
+                    // Batch fallback: use one cheap capsule for moderately
+                    // elongated rounded parts before creating a mesh. The
+                    // stricter interactive thresholds are unchanged.
+                    bool relaxedCapsule = allowRelaxedBatchPrimitives && capsule != null &&
+                        capsule.fill >= 0.14f && capsule.elongation >= 1.20f &&
+                        capsule.radialAspect <= 3.00f;
+                    if (normalCapsule || relaxedCapsule)
+                    {
+                        if (capsule.fill > bestFill) { bestFill = capsule.fill; bestFit = capsule; bestKind = "capsule"; }
+                        // A capsule is preferable to a box for a long/rounded
+                        // part even when the box has a numerically higher fill.
+                        capsulePreferred = relaxedCapsule || normalCapsule;
+                    }
                 }
 
                 if (preferParametricPrimitives)
@@ -360,12 +394,29 @@ public sealed class S4ColliderOptimizer : EditorWindow
                 }
 
                 BoxFit box = null;
-                if (TryFitBox(root.transform, mc, out box) && box.fill >= minBoxFill)
+                if (!capsulePreferred && TryFitBox(root.transform, mc, out box) &&
+                    (box.fill >= minBoxFill || (allowLowFillFallback && box.fill >= LowFillFallback)))
                 {
                     if (box.fill > bestFill) { bestFill = box.fill; bestFit = box; bestKind = "box"; }
                 }
 
-                if (bestFit == null) continue;
+                if (bestFit == null)
+                {
+                    // Keep one continuous, generated low-poly hull for an
+                    // arbitrary curved part. Unlike the old sliced-box
+                    // fallback, this has no internal seams for a rolling ball.
+                    if (TryFitLowPolyHull(root.transform, mc, out LowPolyFit lowPoly))
+                    {
+                        lowPolyHulls.Add(lowPoly);
+                        disabled.Add(mc);
+                    }
+                    else if (TryFitBoundsBox(root.transform, mc, out BoxFit boundsBox))
+                    {
+                        boxes.Add(boundsBox);
+                        disabled.Add(mc);
+                    }
+                    continue;
+                }
 
                 switch (bestKind)
                 {
@@ -394,7 +445,7 @@ public sealed class S4ColliderOptimizer : EditorWindow
         int beforeMerge = boxes.Count;
         boxes = MergeBoxes(boxes);
 
-        if (boxes.Count == 0 && capsules.Count == 0 && spheres.Count == 0 && primitives.Count == 0)
+        if (boxes.Count == 0 && capsules.Count == 0 && spheres.Count == 0 && primitives.Count == 0 && lowPolyHulls.Count == 0)
         {
             if (useUndo) Undo.CollapseUndoOperations(undoGroup);
             return $"[S4 collider optimizer] {root.name}: no hull passed the box/sphere/capsule/primitive fill thresholds " +
@@ -402,7 +453,6 @@ public sealed class S4ColliderOptimizer : EditorWindow
         }
 
         var generated = new GameObject(GeneratedRootName);
-        generated.tag = "EditorOnly";
         if (useUndo) Undo.RegisterCreatedObjectUndo(generated, "Create optimized collider root");
         generated.transform.SetParent(root.transform, false);
 
@@ -410,7 +460,6 @@ public sealed class S4ColliderOptimizer : EditorWindow
         {
             BoxFit fit = boxes[i];
             var child = new GameObject($"Box_{i:000}");
-            child.tag = "EditorOnly";
             if (useUndo) Undo.RegisterCreatedObjectUndo(child, "Create optimized box collider");
             child.transform.SetParent(generated.transform, false);
             child.transform.localPosition = fit.center;
@@ -424,7 +473,6 @@ public sealed class S4ColliderOptimizer : EditorWindow
         {
             CapsuleFit fit = capsules[i];
             var child = new GameObject($"Capsule_{i:000}");
-            child.tag = "EditorOnly";
             if (useUndo) Undo.RegisterCreatedObjectUndo(child, "Create optimized capsule collider");
             child.transform.SetParent(generated.transform, false);
             child.transform.localPosition = fit.center;
@@ -442,7 +490,6 @@ public sealed class S4ColliderOptimizer : EditorWindow
         {
             SphereFit fit = spheres[i];
             var child = new GameObject($"Sphere_{i:000}");
-            child.tag = "EditorOnly";
             if (useUndo) Undo.RegisterCreatedObjectUndo(child, "Create optimized sphere collider");
             child.transform.SetParent(generated.transform, false);
             child.transform.localPosition = fit.center;
@@ -454,12 +501,23 @@ public sealed class S4ColliderOptimizer : EditorWindow
             sphere.center = Vector3.zero;
             sphere.radius = fit.radius;
         }
+        for (int i = 0; i < lowPolyHulls.Count; i++)
+        {
+            LowPolyFit fit = lowPolyHulls[i];
+            var child = new GameObject($"LowPolyHull_{i:000}");
+            child.transform.SetParent(generated.transform, false);
+            child.transform.localPosition = fit.center;
+            child.transform.localRotation = Quaternion.identity;
+            child.transform.localScale = Vector3.one;
+            MeshCollider hull = useUndo ? Undo.AddComponent<MeshCollider>(child) : child.AddComponent<MeshCollider>();
+            hull.sharedMesh = fit.mesh;
+            hull.convex = true;
+        }
         for (int i = 0; i < primitives.Count; i++)
         {
             var fit = primitives[i];
             string label = fit.shape.ToString();
             var child = new GameObject($"{label}_{i:000}");
-            child.tag = "EditorOnly";
             if (useUndo) Undo.RegisterCreatedObjectUndo(child, "Create optimized parametric collider");
             child.transform.SetParent(generated.transform, false);
             child.transform.localPosition = fit.center;
@@ -493,7 +551,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
         }
         return $"[S4 collider optimizer] {root.name}: replaced {disabled.Count} convex " +
                $"MeshColliders by {boxes.Count} BoxColliders, {capsules.Count} CapsuleColliders, " +
-               $"{spheres.Count} SphereColliders, {primitives.Count} parametric primitives " +
+               $"{spheres.Count} SphereColliders, {primitives.Count} parametric primitives, " +
+               $"{lowPolyHulls.Count} generated low-poly hulls " +
                $"({beforeMerge - boxes.Count} additional boxes removed by merging). " +
                $"{originals.Count - disabled.Count} complex MeshColliders were kept.";
     }
@@ -856,6 +915,126 @@ public sealed class S4ColliderOptimizer : EditorWindow
         };
         fit.sources.Add(mc);
         return IsFinite(fit.center) && fit.radius > 0f;
+    }
+
+    [Serializable]
+    sealed class LowPolyFit
+    {
+        public Vector3 center;
+        public Mesh mesh;
+        public readonly HashSet<MeshCollider> sources = new HashSet<MeshCollider>();
+    }
+
+    static bool TryFitLowPolyHull(Transform root, MeshCollider mc, out LowPolyFit fit)
+    {
+        fit = null;
+        if (mc == null || mc.sharedMesh == null || !mc.sharedMesh.isReadable) return false;
+        Vector3[] source = mc.sharedMesh.vertices;
+        if (source == null || source.Length < 4) return false;
+        Vector3[] points = new Vector3[source.Length];
+        Vector3 center = Vector3.zero;
+        for (int i = 0; i < source.Length; i++)
+        {
+            points[i] = root.InverseTransformPoint(mc.transform.TransformPoint(source[i]));
+            center += points[i];
+        }
+        center /= source.Length;
+        Vector3[] centered = new Vector3[points.Length];
+        for (int i = 0; i < points.Length; i++) centered[i] = points[i] - center;
+        Mesh mesh = S4LowPolyHullFactory.Build(centered, "s4_lowpoly_" + mc.sharedMesh.GetInstanceID(), 24);
+        if (mesh == null) return false;
+        fit = new LowPolyFit { center = center, mesh = mesh };
+        fit.sources.Add(mc);
+        return true;
+    }
+
+    // ---------- Segmented fallback for curved parts ----------
+
+    static bool TryFitSegmentedBoxes(Transform root, MeshCollider mc, out List<BoxFit> result)
+    {
+        result = new List<BoxFit>();
+        Mesh mesh = mc != null ? mc.sharedMesh : null;
+        if (mesh == null || !mesh.isReadable || mesh.vertexCount < 4) return false;
+
+        Vector3[] vertices = mesh.vertices;
+        var points = new Vector3[vertices.Length];
+        for (int i = 0; i < vertices.Length; i++)
+            points[i] = root.InverseTransformPoint(mc.transform.TransformPoint(vertices[i]));
+
+        Quaternion rotation = PrincipalRotation(points);
+        Quaternion inverse = Quaternion.Inverse(rotation);
+        Vector3 min = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        Vector3 max = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+        for (int i = 0; i < points.Length; i++)
+        {
+            Vector3 q = inverse * points[i];
+            min = Vector3.Min(min, q);
+            max = Vector3.Max(max, q);
+        }
+        Vector3 span = max - min;
+        int slices = span.x >= span.y && span.x >= span.z ? 8 : 6;
+        float step = span.x >= span.y && span.x >= span.z ? span.x / slices :
+                     (span.y >= span.z ? span.y / slices : span.z / slices);
+        if (step <= 1e-5f) return false;
+
+        // Slice on the longest principal axis. Each slice overlaps its
+        // neighbours by 12.5%, preventing contact gaps for rolling objects.
+        int axis = span.x >= span.y && span.x >= span.z ? 0 :
+                   (span.y >= span.z ? 1 : 2);
+        for (int s = 0; s < slices; s++)
+        {
+            float a = GetComponent(min, axis) + step * (s - 0.125f);
+            float b = GetComponent(min, axis) + step * (s + 1.125f);
+            Vector3 lo = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+            Vector3 hi = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+            int count = 0;
+            for (int i = 0; i < points.Length; i++)
+            {
+                Vector3 q = inverse * points[i];
+                float t = GetComponent(q, axis);
+                if (t < a || t > b) continue;
+                lo = Vector3.Min(lo, q); hi = Vector3.Max(hi, q); count++;
+            }
+            if (count < 2) continue;
+            Vector3 size = hi - lo;
+            // Small inflation protects against faces between sparse vertices.
+            size += Vector3.one * Mathf.Max(0.001f, size.magnitude * 0.015f);
+            float centerAxis = (lo[axis] + hi[axis]) * 0.5f;
+            Vector3 center = rotation * ((lo + hi) * 0.5f);
+            center[axis] = centerAxis; // replaced below in rotated coordinates
+            Vector3 localCenter = (lo + hi) * 0.5f;
+            BoxFit fit = new BoxFit {
+                center = rotation * localCenter,
+                rotation = rotation,
+                size = size,
+                volume = size.x * size.y * size.z,
+                fill = 0f
+            };
+            fit.sources.Add(mc);
+            result.Add(fit);
+        }
+        return result.Count >= 2;
+    }
+
+    static float GetComponent(Vector3 v, int axis) => axis == 0 ? v.x : (axis == 1 ? v.y : v.z);
+
+    static bool TryFitBoundsBox(Transform root, MeshCollider mc, out BoxFit fit)
+    {
+        fit = null;
+        if (mc == null) return false;
+        Bounds b = mc.bounds;
+        Vector3 min = root.InverseTransformPoint(b.min);
+        Vector3 max = root.InverseTransformPoint(b.max);
+        Vector3 size = Vector3.Max(Vector3.one * 0.001f, max - min);
+        fit = new BoxFit {
+            center = (min + max) * 0.5f,
+            rotation = Quaternion.identity,
+            size = size,
+            volume = size.x * size.y * size.z,
+            fill = 0f
+        };
+        fit.sources.Add(mc);
+        return true;
     }
 
     // ---------- Box fit ----------
