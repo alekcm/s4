@@ -1,3 +1,17 @@
+// s4extract collider optimizer.  Replaces simple convex MeshColliders on a
+// Sims-4-exported prefab with oriented Box / Capsule / Sphere colliders and
+// merges aligned boxes.  Two entry points:
+//
+//   * Manual: Window → Tools/S4 Extract/Collider Optimizer → "Optimize selected".
+//   * Batch : S4ColliderOptimizer.OptimizeForBatch(root, ...)
+//             Called automatically by S4ExtractBatchFixer when building the
+//             _READY prefab.
+//
+// Capsules cover long rounded parts (legs, posts); spheres cover knobs and
+// small rounded caps that neither a box nor a capsule fills well; boxes cover
+// everything roughly prismatic.  Colliders whose mesh name contains
+// "parametric_keep" (lathe/hollow parts from the exporter) are left as
+// MeshColliders intentionally.
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
@@ -5,12 +19,6 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-/// <summary>
-/// Offline editor tool for replacing simple convex MeshColliders with oriented
-/// BoxColliders and merging aligned neighbouring boxes. Put this file anywhere
-/// under Assets/Editor, select a prefab instance/root, then open
-/// Tools/S4 Extract/Collider Optimizer.
-/// </summary>
 public sealed class S4ColliderOptimizer : EditorWindow
 {
     const string GeneratedRootName = "__S4_OptimizedColliders";
@@ -18,12 +26,16 @@ public sealed class S4ColliderOptimizer : EditorWindow
 
     [SerializeField, Range(0.10f, 0.99f)] float minBoxFill = 0.50f;
     [SerializeField, Range(0.10f, 0.99f)] float minCapsuleFill = 0.30f;
-    [SerializeField, Range(1.2f, 8f)] float minCapsuleElongation = 2.2f;
-    [SerializeField, Range(1f, 3f)] float maxCapsuleRadialAspect = 1.40f;
+    [SerializeField, Range(0.10f, 0.99f)] float minSphereFill  = 0.55f;
+    [SerializeField, Range(0.10f, 0.99f)] float minPrimitiveFill = 0.65f;
+    [SerializeField, Range(1.2f, 8f)]   float minCapsuleElongation = 2.2f;
+    [SerializeField, Range(1f, 3f)]     float maxCapsuleRadialAspect = 1.40f;
     [SerializeField] bool preferSmoothCapsules = true;
-    [SerializeField, Range(0f, 0.25f)] float maxMergeInflation = 0.04f;
+    [SerializeField] bool preferSpheres = true;
+    [SerializeField] bool preferParametricPrimitives = true;
+    [SerializeField, Range(0f, 0.25f)]  float maxMergeInflation = 0.04f;
     [SerializeField] float contactEpsilon = 0.003f;
-    [SerializeField, Range(0f, 20f)] float maxAxisAngle = 6f;
+    [SerializeField, Range(0f, 20f)]    float maxAxisAngle = 6f;
     [SerializeField] bool includeInactive = false;
 
     [MenuItem("Tools/S4 Extract/Collider Optimizer")]
@@ -36,33 +48,87 @@ public sealed class S4ColliderOptimizer : EditorWindow
         float minimumBoxFill = 0.50f, float mergeEmptyVolume = 0.04f,
         float gapEpsilon = 0.003f, float axisAngle = 6f)
     {
-        if (root == null) return "S4 collider optimizer: null root";
+        if (root == null) return "[S4 collider optimizer] null root";
         var worker = CreateInstance<S4ColliderOptimizer>();
         try
         {
-            worker.minBoxFill = minimumBoxFill;
-            // Batch mode must be substantially more conservative than the
-            // manual preview tool. A false positive creates invisible shelves.
-            worker.minCapsuleFill = 0.55f;
-            worker.minCapsuleElongation = 2.5f;
-            worker.maxCapsuleRadialAspect = 1.25f;
-            worker.preferSmoothCapsules = true;
-            worker.maxMergeInflation = mergeEmptyVolume;
-            worker.contactEpsilon = gapEpsilon;
-            worker.maxAxisAngle = axisAngle;
-            worker.includeInactive = true;
-            string result = worker.OptimizeRoot(root, false);
+            // Start with a conservative furniture-friendly threshold; if it
+            // produces nothing, walk the fill down so that curved/cylinder-ish
+            // Sims pieces still get simplified rather than left as expensive
+            // convex MeshColliders.
+            float[] fillTries = new[] { minimumBoxFill, 0.40f, 0.35f, 0.28f };
+            float usedFill = minimumBoxFill;
+            string lastResult = null;
+            foreach (float f in fillTries)
+            {
+                worker.minBoxFill = f;
+                worker.minCapsuleFill = Mathf.Min(0.55f, f + 0.05f);
+                worker.minSphereFill  = Mathf.Min(0.60f, f + 0.10f);
+                worker.minPrimitiveFill = Mathf.Min(0.65f, f + 0.15f);
+                worker.minCapsuleElongation = 2.3f;
+                worker.maxCapsuleRadialAspect = 1.30f;
+                worker.preferSmoothCapsules = true;
+                worker.preferSpheres = true;
+                worker.preferParametricPrimitives = true;
+                worker.maxMergeInflation = mergeEmptyVolume;
+                worker.contactEpsilon = gapEpsilon;
+                worker.maxAxisAngle = axisAngle;
+                worker.includeInactive = true;
+                lastResult = worker.OptimizeRoot(root, false);
+                // OptimizeRoot returns a sentence like "... replaced N by B boxes ...".
+                // If it produced any replacements we are done.
+                if (lastResult.Contains("replaced 0 ") && lastResult.Contains("kept."))
+                {
+                    RestoreInternal(root, false);
+                    continue;
+                }
+                usedFill = f;
+                break;
+            }
 
-            // Batch-created READY prefabs are reproducible. Keeping disabled
-            // MeshCollider components would waste serialized data and memory.
+            // Strip disabled MeshColliders + their marker objects (READY prefabs
+            // are reproducible, so keeping dead components just wastes size).
+            int removedDisabled = 0;
             foreach (MeshCollider mc in root.GetComponentsInChildren<MeshCollider>(true))
-                if (!mc.enabled) DestroyImmediate(mc);
+            {
+                if (mc == null) continue;
+                if (!mc.enabled)
+                {
+                    DestroyImmediate(mc);
+                    removedDisabled++;
+                }
+            }
             foreach (Transform t in root.GetComponentsInChildren<Transform>(true)
-                         .Where(t => t != root.transform &&
+                         .Where(t => t != null && t != root.transform &&
                                      t.name.StartsWith(DisabledMarkerPrefix, StringComparison.Ordinal))
                          .ToArray())
-                DestroyImmediate(t.gameObject);
-            return result;
+            {
+                if (t != null) DestroyImmediate(t.gameObject);
+            }
+
+            // Count survivors for a clearer log line.
+            int remainingMeshes = root.GetComponentsInChildren<MeshCollider>(true).Length;
+            int boxes = 0, capsules = 0, spheres = 0, primitives = 0;
+            Transform gen = root.transform.Find(GeneratedRootName);
+            if (gen != null)
+            {
+                boxes      = gen.GetComponentsInChildren<BoxCollider>(true).Length;
+                capsules   = gen.GetComponentsInChildren<CapsuleCollider>(true).Length;
+                spheres    = gen.GetComponentsInChildren<SphereCollider>(true).Length;
+                // Parametric-primitive colliders are MeshColliders under __S4_OptimizedColliders
+                // whose mesh was generated by S4PrimitiveMeshFactory.  Count them separately.
+                foreach (MeshCollider mc in gen.GetComponentsInChildren<MeshCollider>(true))
+                {
+                    if (mc == null || mc.sharedMesh == null) continue;
+                    string n = mc.sharedMesh.name;
+                    if (n.StartsWith("cyl_") || n.StartsWith("hemi") || n.StartsWith("cone") ||
+                        n.StartsWith("tcony_") || n.StartsWith("sphere_"))
+                        primitives++;
+                }
+            }
+            return $"{lastResult}  [batch: used boxFill={usedFill:F2}, removed {removedDisabled} disabled MeshCollider(s); " +
+                   $"final counts: {boxes} box, {capsules} capsule, {spheres} sphere, {primitives} parametric-mesh; " +
+                   $"{remainingMeshes} convex MeshCollider(s) kept.]";
         }
         finally { DestroyImmediate(worker); }
     }
@@ -70,7 +136,7 @@ public sealed class S4ColliderOptimizer : EditorWindow
     void OnGUI()
     {
         EditorGUILayout.HelpBox(
-            "Replaces simple convex MeshColliders with oriented boxes or smooth capsules, " +
+            "Replaces simple convex MeshColliders with oriented boxes, capsules or spheres, " +
             "then merges aligned touching boxes. Originals are disabled, not deleted.",
             MessageType.Info);
         minBoxFill = EditorGUILayout.Slider(
@@ -88,6 +154,15 @@ public sealed class S4ColliderOptimizer : EditorWindow
         minCapsuleFill = EditorGUILayout.Slider("Minimum capsule fill", minCapsuleFill, 0.10f, 0.99f);
         minCapsuleElongation = EditorGUILayout.Slider("Capsule elongation", minCapsuleElongation, 1.2f, 8f);
         maxCapsuleRadialAspect = EditorGUILayout.Slider("Capsule radial aspect", maxCapsuleRadialAspect, 1f, 3f);
+        preferSpheres = EditorGUILayout.Toggle(
+            new GUIContent("Prefer spheres", "Use spheres for knobs / small rounded caps."), preferSpheres);
+        minSphereFill = EditorGUILayout.Slider("Minimum sphere fill", minSphereFill, 0.10f, 0.99f);
+        preferParametricPrimitives = EditorGUILayout.Toggle(
+            new GUIContent("Parametric primitives (cyl/hemisphere/cone)",
+                           "Use low-poly cylinders, hemispheres, cones/lampshades as MeshColliders " +
+                           "for objects whose shape doesn't reduce well to a box, capsule or sphere."),
+            preferParametricPrimitives);
+        minPrimitiveFill = EditorGUILayout.Slider("Minimum primitive fill", minPrimitiveFill, 0.10f, 0.99f);
         maxMergeInflation = EditorGUILayout.Slider(
             new GUIContent("Merge empty volume", "Maximum empty fraction introduced by merging boxes."),
             maxMergeInflation, 0f, 0.25f);
@@ -119,11 +194,12 @@ public sealed class S4ColliderOptimizer : EditorWindow
 
     List<MeshCollider> SourceColliders(GameObject root, bool enabledOnly)
     {
+        if (root == null) return new List<MeshCollider>();
         return root.GetComponentsInChildren<MeshCollider>(includeInactive)
             .Where(c => c != null && c.sharedMesh != null && c.convex &&
                         !c.sharedMesh.name.Contains("parametric_keep") &&
                         c.transform.name != GeneratedRootName &&
-                        c.transform.parent?.name != GeneratedRootName &&
+                        (c.transform.parent == null || c.transform.parent.name != GeneratedRootName) &&
                         (!enabledOnly || c.enabled) &&
                         !IsUnderGeneratedRoot(c.transform, root.transform))
             .ToList();
@@ -164,11 +240,30 @@ public sealed class S4ColliderOptimizer : EditorWindow
         List<MeshCollider> colliders = SourceColliders(root, true);
         var fills = new List<float>();
         int capsuleCandidates = 0;
+        int sphereCandidates = 0;
+        int primitiveCandidates = 0;
+        int skipped = 0;
         foreach (MeshCollider mc in colliders)
         {
-            if (TryFitBox(root.transform, mc, out BoxFit fit)) fills.Add(fit.fill);
-            if (preferSmoothCapsules && TryFitCapsule(root.transform, mc, out CapsuleFit capsule) &&
-                IsCapsuleCandidate(capsule)) capsuleCandidates++;
+            try
+            {
+                EnsureMeshReadable(mc);
+                if (TryFitBox(root.transform, mc, out BoxFit fit)) fills.Add(fit.fill);
+                if (preferSmoothCapsules && TryFitCapsule(root.transform, mc, out CapsuleFit capsule) &&
+                    IsCapsuleCandidate(capsule)) capsuleCandidates++;
+                if (preferSpheres && TryFitSphere(root.transform, mc, out SphereFit sphere) &&
+                    IsSphereCandidate(sphere)) sphereCandidates++;
+                if (preferParametricPrimitives)
+                {
+                    var prim = S4PrimitiveFitters.TryFitBestPrimitive(root.transform, mc, minPrimitiveFill);
+                    if (prim != null) primitiveCandidates++;
+                }
+            }
+            catch (Exception e)
+            {
+                skipped++;
+                Debug.LogWarning($"[S4 collider optimizer] Skip {DescribeCollider(mc)}: {e.Message}");
+            }
         }
         fills.Sort();
         int boxable = fills.Count(v => v >= minBoxFill);
@@ -178,13 +273,14 @@ public sealed class S4ColliderOptimizer : EditorWindow
         float best = fills.Count > 0 ? fills[fills.Count - 1] : 0f;
         float average = fills.Count > 0 ? fills.Average() : 0f;
         string message = $"[S4 collider optimizer] {root.name}: {colliders.Count} enabled convex " +
-                         $"MeshColliders; {boxable} candidates at current fill >= {minBoxFill:F2}. " +
-                         $"Successfully analyzed {fills.Count}; average {average:F3}, best {best:F3}. " +
-                         $"Candidates by preset: aggressive(0.35)={at35}, furniture(0.50)={at50}, safe(0.70)={at70}; " +
-                         $"smooth capsule candidates={capsuleCandidates}.";
+                         $"MeshColliders; {boxable} box-candidates at fill >= {minBoxFill:F2}. " +
+                         $"Analyzed {fills.Count} (skipped {skipped}); average fill {average:F3}, best {best:F3}. " +
+                         $"By preset: aggressive(0.35)={at35}, furniture(0.50)={at50}, safe(0.70)={at70}; " +
+                         $"capsule candidates={capsuleCandidates}, sphere candidates={sphereCandidates}, " +
+                         $"parametric candidates={primitiveCandidates}.";
         if (logContext != null) Debug.Log(message, logContext); else Debug.Log(message);
         ShowNotification(new GUIContent(
-            $"boxes {boxable}, capsules {capsuleCandidates}; best box {best:F2}"));
+            $"boxes {boxable}, capsules {capsuleCandidates}, spheres {sphereCandidates}, prim {primitiveCandidates}; best box {best:F2}"));
     }
 
     void OptimizeSelected()
@@ -224,35 +320,97 @@ public sealed class S4ColliderOptimizer : EditorWindow
         List<MeshCollider> originals = SourceColliders(root, true);
         var boxes = new List<BoxFit>();
         var capsules = new List<CapsuleFit>();
+        var spheres = new List<SphereFit>();
+        var primitives = new List<S4PrimitiveFitters.PrimitiveFit>();
+        var disabled = new HashSet<MeshCollider>();
+
+        // Pick best primitive per source hull, choosing whichever parametric shape
+        // (sphere, capsule, parametric-mesh cylinder/hemisphere/cone, or box) yields
+        // the highest fill ratio above its respective threshold.
         foreach (MeshCollider mc in originals)
         {
-            CapsuleFit capsule = null;
-            bool capsuleChosen = preferSmoothCapsules &&
-                TryFitCapsule(root.transform, mc, out capsule) &&
-                IsCapsuleCandidate(capsule);
-            if (capsuleChosen)
-                capsules.Add(capsule);
-            else if (TryFitBox(root.transform, mc, out BoxFit fit) && fit.fill >= minBoxFill)
-                boxes.Add(fit);
+            try
+            {
+                EnsureMeshReadable(mc);
+
+                float bestFill = -1f;
+                object bestFit = null;
+                string bestKind = null;
+
+                SphereFit sphere = null;
+                if (preferSpheres && TryFitSphere(root.transform, mc, out sphere) && IsSphereCandidate(sphere))
+                {
+                    if (sphere.fill > bestFill) { bestFill = sphere.fill; bestFit = sphere; bestKind = "sphere"; }
+                }
+
+                CapsuleFit capsule = null;
+                if (preferSmoothCapsules && TryFitCapsule(root.transform, mc, out capsule) && IsCapsuleCandidate(capsule))
+                {
+                    if (capsule.fill > bestFill) { bestFill = capsule.fill; bestFit = capsule; bestKind = "capsule"; }
+                }
+
+                if (preferParametricPrimitives)
+                {
+                    S4PrimitiveFitters.PrimitiveFit prim =
+                        S4PrimitiveFitters.TryFitBestPrimitive(root.transform, mc, minPrimitiveFill);
+                    if (prim != null && prim.fill > bestFill)
+                    {
+                        bestFill = prim.fill; bestFit = prim; bestKind = "primitive";
+                    }
+                }
+
+                BoxFit box = null;
+                if (TryFitBox(root.transform, mc, out box) && box.fill >= minBoxFill)
+                {
+                    if (box.fill > bestFill) { bestFill = box.fill; bestFit = box; bestKind = "box"; }
+                }
+
+                if (bestFit == null) continue;
+
+                switch (bestKind)
+                {
+                    case "sphere":    spheres.Add((SphereFit)bestFit); break;
+                    case "capsule":   capsules.Add((CapsuleFit)bestFit); break;
+                    case "primitive": primitives.Add((S4PrimitiveFitters.PrimitiveFit)bestFit); break;
+                    case "box":       boxes.Add((BoxFit)bestFit); break;
+                }
+
+                IEnumerable<MeshCollider> src;
+                switch (bestKind)
+                {
+                    case "sphere":    src = ((SphereFit)bestFit).sources; break;
+                    case "capsule":   src = ((CapsuleFit)bestFit).sources; break;
+                    case "primitive": src = ((S4PrimitiveFitters.PrimitiveFit)bestFit).sources; break;
+                    default:          src = ((BoxFit)bestFit).sources; break;
+                }
+                foreach (var s in src) disabled.Add(s);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[S4 collider optimizer] Skipping {DescribeCollider(mc)} during fit: {e.Message}");
+            }
         }
 
         int beforeMerge = boxes.Count;
         boxes = MergeBoxes(boxes);
-        if (boxes.Count == 0 && capsules.Count == 0)
+
+        if (boxes.Count == 0 && capsules.Count == 0 && spheres.Count == 0 && primitives.Count == 0)
         {
             if (useUndo) Undo.CollapseUndoOperations(undoGroup);
-            return $"[S4 collider optimizer] {root.name}: no hull passed the box-fit threshold.";
+            return $"[S4 collider optimizer] {root.name}: no hull passed the box/sphere/capsule/primitive fill thresholds " +
+                   $"({originals.Count} convex MeshColliders kept).";
         }
 
         var generated = new GameObject(GeneratedRootName);
+        generated.tag = "EditorOnly";
         if (useUndo) Undo.RegisterCreatedObjectUndo(generated, "Create optimized collider root");
         generated.transform.SetParent(root.transform, false);
 
-        var disabled = new HashSet<MeshCollider>();
         for (int i = 0; i < boxes.Count; i++)
         {
             BoxFit fit = boxes[i];
             var child = new GameObject($"Box_{i:000}");
+            child.tag = "EditorOnly";
             if (useUndo) Undo.RegisterCreatedObjectUndo(child, "Create optimized box collider");
             child.transform.SetParent(generated.transform, false);
             child.transform.localPosition = fit.center;
@@ -261,12 +419,12 @@ public sealed class S4ColliderOptimizer : EditorWindow
             BoxCollider box = useUndo ? Undo.AddComponent<BoxCollider>(child) : child.AddComponent<BoxCollider>();
             box.center = Vector3.zero;
             box.size = fit.size;
-            foreach (MeshCollider source in fit.sources) disabled.Add(source);
         }
         for (int i = 0; i < capsules.Count; i++)
         {
             CapsuleFit fit = capsules[i];
             var child = new GameObject($"Capsule_{i:000}");
+            child.tag = "EditorOnly";
             if (useUndo) Undo.RegisterCreatedObjectUndo(child, "Create optimized capsule collider");
             child.transform.SetParent(generated.transform, false);
             child.transform.localPosition = fit.center;
@@ -276,22 +434,55 @@ public sealed class S4ColliderOptimizer : EditorWindow
                 ? Undo.AddComponent<CapsuleCollider>(child)
                 : child.AddComponent<CapsuleCollider>();
             capsule.center = Vector3.zero;
-            capsule.direction = 1; // local Y
+            capsule.direction = 1;
             capsule.radius = fit.radius;
             capsule.height = fit.height;
-            foreach (MeshCollider source in fit.sources) disabled.Add(source);
         }
+        for (int i = 0; i < spheres.Count; i++)
+        {
+            SphereFit fit = spheres[i];
+            var child = new GameObject($"Sphere_{i:000}");
+            child.tag = "EditorOnly";
+            if (useUndo) Undo.RegisterCreatedObjectUndo(child, "Create optimized sphere collider");
+            child.transform.SetParent(generated.transform, false);
+            child.transform.localPosition = fit.center;
+            child.transform.localRotation = Quaternion.identity;
+            child.transform.localScale = Vector3.one;
+            SphereCollider sphere = useUndo
+                ? Undo.AddComponent<SphereCollider>(child)
+                : child.AddComponent<SphereCollider>();
+            sphere.center = Vector3.zero;
+            sphere.radius = fit.radius;
+        }
+        for (int i = 0; i < primitives.Count; i++)
+        {
+            var fit = primitives[i];
+            string label = fit.shape.ToString();
+            var child = new GameObject($"{label}_{i:000}");
+            child.tag = "EditorOnly";
+            if (useUndo) Undo.RegisterCreatedObjectUndo(child, "Create optimized parametric collider");
+            child.transform.SetParent(generated.transform, false);
+            child.transform.localPosition = fit.center;
+            child.transform.localRotation = fit.rotation;
+            child.transform.localScale = fit.scale;
+            MeshCollider mc = useUndo ? Undo.AddComponent<MeshCollider>(child) : child.AddComponent<MeshCollider>();
+            mc.sharedMesh = fit.mesh;
+            mc.convex = true;
+        }
+
+        // Disable the original mesh colliders and leave markers so Restore can bring them back.
         foreach (MeshCollider source in disabled)
         {
+            if (source == null) continue;
             if (useUndo) Undo.RecordObject(source, "Disable replaced mesh collider");
             source.enabled = false;
             EditorUtility.SetDirty(source);
             MeshCollider[] siblings = source.GetComponents<MeshCollider>();
             int componentIndex = Array.IndexOf(siblings, source);
             var marker = new GameObject(DisabledMarkerPrefix + componentIndex);
+            marker.tag = "EditorOnly";
             if (useUndo) Undo.RegisterCreatedObjectUndo(marker, "Mark replaced mesh collider");
             marker.transform.SetParent(source.transform, false);
-            marker.tag = "EditorOnly";
         }
 
         EditorUtility.SetDirty(root);
@@ -301,7 +492,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
             Selection.activeGameObject = generated;
         }
         return $"[S4 collider optimizer] {root.name}: replaced {disabled.Count} convex " +
-               $"MeshColliders by {boxes.Count} BoxColliders and {capsules.Count} CapsuleColliders " +
+               $"MeshColliders by {boxes.Count} BoxColliders, {capsules.Count} CapsuleColliders, " +
+               $"{spheres.Count} SphereColliders, {primitives.Count} parametric primitives " +
                $"({beforeMerge - boxes.Count} additional boxes removed by merging). " +
                $"{originals.Count - disabled.Count} complex MeshColliders were kept.";
     }
@@ -332,34 +524,39 @@ public sealed class S4ColliderOptimizer : EditorWindow
 
     static void RestoreInternal(GameObject root, bool useUndo)
     {
+        if (root == null) return;
         Transform generated = root.transform.Find(GeneratedRootName);
         if (generated != null)
         {
             if (useUndo) Undo.DestroyObjectImmediate(generated.gameObject);
             else DestroyImmediate(generated.gameObject);
         }
-        // Restore only colliders disabled by this tool. Unrelated intentionally
-        // disabled MeshColliders must stay disabled.
         var markers = root.GetComponentsInChildren<Transform>(true)
-            .Where(t => t != root.transform && t.name.StartsWith(DisabledMarkerPrefix, StringComparison.Ordinal))
+            .Where(t => t != null && t != root.transform && t.name.StartsWith(DisabledMarkerPrefix, StringComparison.Ordinal))
             .ToArray();
         foreach (Transform marker in markers)
         {
+            if (marker == null || marker.parent == null) continue;
             if (int.TryParse(marker.name.Substring(DisabledMarkerPrefix.Length), out int index))
             {
                 MeshCollider[] siblings = marker.parent.GetComponents<MeshCollider>();
                 if (index >= 0 && index < siblings.Length)
                 {
                     MeshCollider mc = siblings[index];
-                    if (useUndo) Undo.RecordObject(mc, "Restore mesh collider");
-                    mc.enabled = true;
-                    EditorUtility.SetDirty(mc);
+                    if (mc != null)
+                    {
+                        if (useUndo) Undo.RecordObject(mc, "Restore mesh collider");
+                        mc.enabled = true;
+                        EditorUtility.SetDirty(mc);
+                    }
                 }
             }
             if (useUndo) Undo.DestroyObjectImmediate(marker.gameObject);
             else DestroyImmediate(marker.gameObject);
         }
     }
+
+    // ---------- Fit result types ----------
 
     [Serializable]
     sealed class BoxFit
@@ -386,17 +583,71 @@ public sealed class S4ColliderOptimizer : EditorWindow
         public readonly HashSet<MeshCollider> sources = new HashSet<MeshCollider>();
     }
 
+    [Serializable]
+    sealed class SphereFit
+    {
+        public Vector3 center;
+        public float radius;
+        public float volume;
+        public float fill;
+        public float radialAspect; // maxSpan / minSpan; close to 1 = spherical
+        public readonly HashSet<MeshCollider> sources = new HashSet<MeshCollider>();
+    }
+
     bool IsCapsuleCandidate(CapsuleFit fit) =>
         fit != null && fit.fill >= minCapsuleFill &&
         fit.elongation >= minCapsuleElongation &&
         fit.radialAspect <= maxCapsuleRadialAspect;
 
+    bool IsSphereCandidate(SphereFit fit) =>
+        fit != null && fit.fill >= minSphereFill &&
+        fit.radialAspect <= 1.35f;
+
+    // ---------- Helpers ----------
+
+    static string DescribeCollider(MeshCollider mc)
+    {
+        if (mc == null) return "<null>";
+        string go = mc.gameObject != null ? mc.gameObject.name : "?";
+        string mesh = (mc.sharedMesh != null) ? mc.sharedMesh.name : "<no mesh>";
+        return $"{go} (mesh: {mesh})";
+    }
+
+    static void EnsureMeshReadable(MeshCollider mc)
+    {
+        if (mc == null || mc.sharedMesh == null) return;
+        Mesh mesh = mc.sharedMesh;
+        if (mesh.isReadable) return;
+        #if UNITY_EDITOR
+        string path = AssetDatabase.GetAssetPath(mesh);
+        if (string.IsNullOrEmpty(path))
+        {
+            throw new InvalidOperationException(
+                $"Mesh '{mesh.name}' is not CPU-readable and has no asset path (probably an in-memory mesh). " +
+                "Enable Read/Write in the Model importer.");
+        }
+        ModelImporter mi = AssetImporter.GetAtPath(path) as ModelImporter;
+        if (mi == null)
+        {
+            throw new InvalidOperationException(
+                $"Mesh '{mesh.name}' is not CPU-readable and is not imported by ModelImporter; cannot auto-enable Read/Write.");
+        }
+        mi.isReadable = true;
+        mi.SaveAndReimport();
+        Mesh reloaded = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+        if (reloaded != null) mc.sharedMesh = reloaded;
+        #endif
+    }
+
+    // ---------- Capsule fit ----------
+
     static bool TryFitCapsule(Transform root, MeshCollider mc, out CapsuleFit fit)
     {
         try { return TryFitCapsuleReadable(root, mc, out fit); }
-        catch (Exception)
+        catch (Exception ex)
         {
             fit = null;
+            Debug.LogWarning($"[S4 collider optimizer] Capsule fit failed on {DescribeCollider(mc)}: {ex.Message}");
             return false;
         }
     }
@@ -407,6 +658,9 @@ public sealed class S4ColliderOptimizer : EditorWindow
         Mesh mesh = mc.sharedMesh;
         if (mesh == null || mesh.vertexCount < 4) return false;
         Vector3[] vertices = mesh.vertices;
+        int[] triangles = mesh.triangles;
+        if (vertices == null || vertices.Length < 4) return false;
+        if (triangles == null || triangles.Length < 3) return false;
         var points = new Vector3[vertices.Length];
         Vector3 mean = Vector3.zero;
         for (int i = 0; i < vertices.Length; i++)
@@ -415,7 +669,7 @@ public sealed class S4ColliderOptimizer : EditorWindow
             mean += points[i];
         }
         mean /= points.Length;
-        float meshVolume = ConvexMeshVolume(root, mc, vertices, mesh.triangles);
+        float meshVolume = ConvexMeshVolume(root, mc, vertices, triangles);
         if (meshVolume <= 1e-9f) return false;
 
         Quaternion basis = PrincipalRotation(points);
@@ -440,8 +694,6 @@ public sealed class S4ColliderOptimizer : EditorWindow
         float crossMin = Mathf.Max(1e-6f, Mathf.Min(crossY, crossZ));
         if (span <= 1e-6f || crossMax <= 1e-6f) return false;
 
-        // Search capsule segment endpoints. Radius is the maximum distance to
-        // that segment, so the resulting capsule contains the source hull.
         float bestVolume = float.PositiveInfinity, bestRadius = 0f;
         float bestA = minT, bestB = maxT;
         const int steps = 9;
@@ -484,14 +736,141 @@ public sealed class S4ColliderOptimizer : EditorWindow
         return IsFinite(fit.center) && fit.height >= 2f*fit.radius;
     }
 
-    static bool TryFitBox(Transform root, MeshCollider mc, out BoxFit fit)
+    // ---------- Sphere fit ----------
+
+    static bool TryFitSphere(Transform root, MeshCollider mc, out SphereFit fit)
     {
-        try { return TryFitBoxReadable(root, mc, out fit); }
+        try { return TryFitSphereReadable(root, mc, out fit); }
         catch (Exception ex)
         {
             fit = null;
-            Debug.LogWarning($"[S4 collider optimizer] Cannot read collider mesh '{mc.name}': {ex.Message}. " +
-                             "Enable Read/Write on its Model Import Settings.", mc);
+            Debug.LogWarning($"[S4 collider optimizer] Sphere fit failed on {DescribeCollider(mc)}: {ex.Message}");
+            return false;
+        }
+    }
+
+    static bool TryFitSphereReadable(Transform root, MeshCollider mc, out SphereFit fit)
+    {
+        fit = null;
+        Mesh mesh = mc.sharedMesh;
+        if (mesh == null || mesh.vertexCount < 4) return false;
+        Vector3[] vertices = mesh.vertices;
+        int[] triangles = mesh.triangles;
+        if (vertices == null || vertices.Length < 4) return false;
+        if (triangles == null || triangles.Length < 3) return false;
+
+        // Build points in root-local space.
+        Vector3[] points = new Vector3[vertices.Length];
+        Vector3 mean = Vector3.zero;
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            points[i] = root.InverseTransformPoint(mc.transform.TransformPoint(vertices[i]));
+            mean += points[i];
+        }
+        mean /= points.Length;
+        float meshVolume = ConvexMeshVolume(root, mc, vertices, triangles);
+        if (meshVolume <= 1e-9f) return false;
+
+        // Initial center = mean, radius = max distance from mean.
+        Vector3 center = mean;
+        float radius = 0f;
+        for (int iter = 0; iter < 6; iter++) // a few Welzl-ish / Ritter-ish iterations
+        {
+            // Find farthest point from center.
+            int farI = 0;
+            float farSq = 0f;
+            for (int i = 0; i < points.Length; i++)
+            {
+                float d2 = (points[i] - center).sqrMagnitude;
+                if (d2 > farSq) { farSq = d2; farI = i; }
+            }
+            Vector3 a = points[farI];
+            // Find farthest point from a.
+            int farJ = 0;
+            float farSq2 = 0f;
+            for (int i = 0; i < points.Length; i++)
+            {
+                float d2 = (points[i] - a).sqrMagnitude;
+                if (d2 > farSq2) { farSq2 = d2; farJ = i; }
+            }
+            Vector3 b = points[farJ];
+            Vector3 newCenter = (a + b) * 0.5f;
+            float newRadius = 0.5f * Mathf.Sqrt(farSq2);
+            // Check for points outside and push the center out to include them.
+            for (int pass = 0; pass < 12; pass++)
+            {
+                bool grew = false;
+                for (int i = 0; i < points.Length; i++)
+                {
+                    Vector3 d = points[i] - newCenter;
+                    float dist = d.magnitude;
+                    if (dist > newRadius + 1e-5f)
+                    {
+                        // Pull the sphere so the point sits on the boundary.
+                        float newR = (newRadius + dist) * 0.5f;
+                        Vector3 dir = dist > 1e-8f ? d / dist : Vector3.up;
+                        newCenter = points[i] - dir * newR;
+                        newRadius = newR;
+                        grew = true;
+                    }
+                }
+                if (!grew) break;
+            }
+            center = newCenter;
+            radius = newRadius;
+        }
+        // Safety: one final inflation pass to guarantee containment.
+        for (int i = 0; i < points.Length; i++)
+        {
+            float d = (points[i] - center).magnitude;
+            if (d > radius) radius = d;
+        }
+        if (radius <= 1e-6f || float.IsNaN(radius) || float.IsInfinity(radius)) return false;
+        float volume = (4f/3f) * Mathf.PI * radius*radius*radius;
+
+        // Aspect ratio for candidate check: compare PCA spans; a good sphere is
+        // roughly equal extent along all three axes.
+        Quaternion basis = PrincipalRotation(points);
+        Quaternion inv = Quaternion.Inverse(basis);
+        float minX=float.PositiveInfinity,maxX=float.NegativeInfinity,
+              minY=float.PositiveInfinity,maxY=float.NegativeInfinity,
+              minZ=float.PositiveInfinity,maxZ=float.NegativeInfinity;
+        for (int i = 0; i < points.Length; i++)
+        {
+            Vector3 q = inv * (points[i] - mean);
+            minX = Mathf.Min(minX,q.x); maxX = Mathf.Max(maxX,q.x);
+            minY = Mathf.Min(minY,q.y); maxY = Mathf.Max(maxY,q.y);
+            minZ = Mathf.Min(minZ,q.z); maxZ = Mathf.Max(maxZ,q.z);
+        }
+        float sx = maxX-minX, sy = maxY-minY, sz = maxZ-minZ;
+        float maxSpan = Mathf.Max(sx, Mathf.Max(sy, sz));
+        float minSpan = Mathf.Max(1e-6f, Mathf.Min(sx, Mathf.Min(sy, sz)));
+
+        fit = new SphereFit
+        {
+            center = center,
+            radius = radius,
+            volume = volume,
+            fill = Mathf.Clamp01(meshVolume / volume),
+            radialAspect = maxSpan / minSpan,
+        };
+        fit.sources.Add(mc);
+        return IsFinite(fit.center) && fit.radius > 0f;
+    }
+
+    // ---------- Box fit ----------
+
+    static bool TryFitBox(Transform root, MeshCollider mc, out BoxFit fit)
+    {
+        try
+        {
+            return TryFitBoxReadable(root, mc, out fit);
+        }
+        catch (Exception ex)
+        {
+            fit = null;
+            Debug.LogWarning($"[S4 collider optimizer] Box fit failed on {DescribeCollider(mc)}: {ex.Message}. " +
+                             "Enable Read/Write on its Model Import Settings.");
             return false;
         }
     }
@@ -502,14 +881,16 @@ public sealed class S4ColliderOptimizer : EditorWindow
         Mesh mesh = mc.sharedMesh;
         if (mesh == null || mesh.vertexCount < 4) return false;
         Vector3[] meshVertices = mesh.vertices;
+        int[] triangles = mesh.triangles;
+        if (meshVertices == null || meshVertices.Length < 4) return false;
+        if (triangles == null || triangles.Length < 3) return false;
         var points = new Vector3[meshVertices.Length];
         for (int i = 0; i < points.Length; i++)
             points[i] = root.InverseTransformPoint(mc.transform.TransformPoint(meshVertices[i]));
 
-        float meshVolume = ConvexMeshVolume(root, mc, meshVertices, mesh.triangles);
+        float meshVolume = ConvexMeshVolume(root, mc, meshVertices, triangles);
         if (meshVolume <= 1e-9f) return false;
 
-        // Test root-aligned and PCA-aligned boxes and keep the tighter one.
         BoxFit axisAligned = FitAtRotation(points, Quaternion.identity);
         Quaternion pcaRotation = PrincipalRotation(points);
         BoxFit oriented = FitAtRotation(points, pcaRotation);
@@ -521,6 +902,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
 
     static float ConvexMeshVolume(Transform root, MeshCollider mc, Vector3[] vertices, int[] triangles)
     {
+        if (vertices == null || vertices.Length < 4) return 0f;
+        if (triangles == null || triangles.Length < 3) return 0f;
         var p = new Vector3[vertices.Length];
         Vector3 centroid = Vector3.zero;
         for (int i = 0; i < vertices.Length; i++)
@@ -532,9 +915,11 @@ public sealed class S4ColliderOptimizer : EditorWindow
         double volume = 0.0;
         for (int i = 0; i + 2 < triangles.Length; i += 3)
         {
-            Vector3 a = p[triangles[i]] - centroid;
-            Vector3 b = p[triangles[i + 1]] - centroid;
-            Vector3 c = p[triangles[i + 2]] - centroid;
+            int ia = triangles[i], ib = triangles[i+1], ic = triangles[i+2];
+            if (ia < 0 || ia >= p.Length || ib < 0 || ib >= p.Length || ic < 0 || ic >= p.Length) continue;
+            Vector3 a = p[ia] - centroid;
+            Vector3 b = p[ib] - centroid;
+            Vector3 c = p[ic] - centroid;
             volume += Math.Abs(Vector3.Dot(a, Vector3.Cross(b, c))) / 6.0;
         }
         return (float)volume;
@@ -567,7 +952,6 @@ public sealed class S4ColliderOptimizer : EditorWindow
         for (int i = 0; i < points.Count; i++) mean += points[i];
         mean /= Mathf.Max(1, points.Count);
 
-        // Symmetric covariance matrix.
         float xx=0, xy=0, xz=0, yy=0, yz=0, zz=0;
         for (int i = 0; i < points.Count; i++)
         {
@@ -575,12 +959,16 @@ public sealed class S4ColliderOptimizer : EditorWindow
             xx += d.x*d.x; xy += d.x*d.y; xz += d.x*d.z;
             yy += d.y*d.y; yz += d.y*d.z; zz += d.z*d.z;
         }
+        float total = xx + yy + zz;
+        if (total < 1e-12f) return Quaternion.identity;
+
         Vector3 major = PowerEigen(xx,xy,xz,yy,yz,zz, new Vector3(0.73f,0.41f,0.55f), Vector3.zero);
+        if (major.sqrMagnitude < 1e-8f) return Quaternion.identity;
         Vector3 second = PowerEigen(xx,xy,xz,yy,yz,zz, new Vector3(0.17f,0.91f,0.37f), major);
         Vector3 third = Vector3.Cross(major, second).normalized;
         if (third.sqrMagnitude < 0.5f) return Quaternion.identity;
         second = Vector3.Cross(third, major).normalized;
-        // local X=major, local Y=second, local Z=third
+        if (second.sqrMagnitude < 0.5f) return Quaternion.identity;
         return Quaternion.LookRotation(third, second);
     }
 
@@ -604,7 +992,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
     {
         var boxes = new List<BoxFit>(input);
         bool changed = true;
-        while (changed)
+        int safety = 0;
+        while (changed && safety++ < 10000)
         {
             changed = false;
             float bestError = float.PositiveInfinity;
@@ -631,7 +1020,6 @@ public sealed class S4ColliderOptimizer : EditorWindow
         merged = null;
         inflation = float.PositiveInfinity;
         float angle = Quaternion.Angle(a.rotation, b.rotation);
-        // PCA can flip equivalent axes by 180 degrees.
         angle = Mathf.Min(angle, Mathf.Abs(180f - angle));
         if (angle > maxAxisAngle) return false;
 
@@ -639,7 +1027,6 @@ public sealed class S4ColliderOptimizer : EditorWindow
         Vector3 ac = inv * a.center;
         Vector3 bc = inv * b.center;
         Vector3 ah = a.size * 0.5f;
-        // Project B's oriented extents into A's frame.
         Matrix4x4 rel = Matrix4x4.Rotate(inv * b.rotation);
         Vector3 bh = b.size * 0.5f;
         Vector3 projected = new Vector3(
