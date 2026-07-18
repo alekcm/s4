@@ -16,6 +16,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -37,6 +38,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
     [SerializeField] float contactEpsilon = 0.003f;
     [SerializeField, Range(0f, 20f)]    float maxAxisAngle = 6f;
     [SerializeField] bool includeInactive = false;
+    [SerializeField] bool logFitDetails = true;
+    [SerializeField] bool writeFitDiagnostics = true;
     // Batch mode may use a deliberately conservative last-resort box for a
     // convex hull that is too irregular for the normal fit thresholds.  The
     // interactive tool remains strict, so a bad automatic box is never
@@ -85,6 +88,7 @@ public sealed class S4ColliderOptimizer : EditorWindow
                 worker.contactEpsilon = gapEpsilon;
                 worker.maxAxisAngle = axisAngle;
                 worker.includeInactive = true;
+                worker.writeFitDiagnostics = true;
                 // Keep irregular/curved hulls as convex MeshColliders instead
                 // of forcing a flat fallback box.
                 worker.allowLowFillFallback = false;
@@ -188,6 +192,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
             contactEpsilon);
         maxAxisAngle = EditorGUILayout.Slider("Maximum axis angle", maxAxisAngle, 0f, 20f);
         includeInactive = EditorGUILayout.Toggle("Include inactive", includeInactive);
+        logFitDetails = EditorGUILayout.Toggle("Log per-collider fit details", logFitDetails);
+        writeFitDiagnostics = EditorGUILayout.Toggle("Save fit diagnostics to file", writeFitDiagnostics);
 
         EditorGUILayout.Space();
         using (new EditorGUI.DisabledScope(Selection.activeGameObject == null))
@@ -343,6 +349,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
         var primitives = new List<S4PrimitiveFitters.PrimitiveFit>();
         var lowPolyHulls = new List<LowPolyFit>();
         var disabled = new HashSet<MeshCollider>();
+        var diagnosticRows = new List<string>();
+        Bounds sourceBounds = CombinedSourceBounds(originals);
 
         // Pick best primitive per source hull, choosing whichever parametric shape
         // (sphere, capsule, parametric-mesh cylinder/hemisphere/cone, or box) yields
@@ -374,13 +382,39 @@ public sealed class S4ColliderOptimizer : EditorWindow
                     bool relaxedCapsule = allowRelaxedBatchPrimitives && capsule != null &&
                         capsule.fill >= 0.14f && capsule.elongation >= 1.20f &&
                         capsule.radialAspect <= 3.00f;
-                    if (normalCapsule || relaxedCapsule)
+                    // Batch mode used to accept a very low-fill capsule even
+                    // when its source hull spanned almost the whole object.
+                    // That is the characteristic failure mode for separated
+                    // supports/ornaments. Keep normal capsules untouched; only
+                    // divert this broad, low-fill batch case to segmentation.
+                    bool broadLowFillBatchCapsule =
+                        allowRelaxedBatchPrimitives && relaxedCapsule &&
+                        capsule.fill < 0.35f &&
+                        MaxAxisCoverage(mc.bounds.size, sourceBounds.size) >= 0.75f;
+                    if ((normalCapsule || relaxedCapsule) && !broadLowFillBatchCapsule)
                     {
                         if (capsule.fill > bestFill) { bestFill = capsule.fill; bestFit = capsule; bestKind = "capsule"; }
                         // A capsule is preferable to a box for a long/rounded
                         // part even when the box has a numerically higher fill.
                         capsulePreferred = relaxedCapsule || normalCapsule;
                     }
+                    else if (broadLowFillBatchCapsule)
+                    {
+                        if (TryFitSegmentedBoxes(root.transform, mc, out List<BoxFit> segmented))
+                        {
+                            boxes.AddRange(segmented);
+                            disabled.Add(mc);
+                            bestFit = segmented[0];
+                            bestKind = "segmented";
+                        }
+                    }
+                }
+
+                if (bestKind == "segmented")
+                {
+                    if (logFitDetails)
+                        Debug.Log($"[S4 fit] {mc.name}: broad low-fill capsule diverted to segmented boxes", mc);
+                    continue;
                 }
 
                 if (preferParametricPrimitives)
@@ -415,6 +449,17 @@ public sealed class S4ColliderOptimizer : EditorWindow
                         boxes.Add(boundsBox);
                         disabled.Add(mc);
                     }
+                    if (logFitDetails)
+                    {
+                        string meshName = mc.sharedMesh != null ? mc.sharedMesh.name : "<none>";
+                        Debug.Log($"[S4 fit] {mc.name} / {meshName}: selected=fallback, " +
+                                  "no primitive passed threshold; original hull replaced by fallback.", mc);
+                    }
+                    if (writeFitDiagnostics)
+                    {
+                        string meshName = mc.sharedMesh != null ? mc.sharedMesh.name : "<none>";
+                        diagnosticRows.Add(FitDiagnosticRow(mc, meshName, "fallback", capsule, box, mc.bounds));
+                    }
                     continue;
                 }
 
@@ -435,6 +480,25 @@ public sealed class S4ColliderOptimizer : EditorWindow
                     default:          src = ((BoxFit)bestFit).sources; break;
                 }
                 foreach (var s in src) disabled.Add(s);
+
+                if (logFitDetails)
+                {
+                    string meshName = mc.sharedMesh != null ? mc.sharedMesh.name : "<none>";
+                    Bounds b = mc.bounds;
+                    string capsuleInfo = capsule != null
+                        ? $"capsule(fill={capsule.fill:F3}, elong={capsule.elongation:F2}, radial={capsule.radialAspect:F2})"
+                        : "capsule=none";
+                    string boxInfo = box != null ? $"box(fill={box.fill:F3})" : "box=none";
+                    Debug.Log($"[S4 fit] {mc.name} / {meshName}: selected={bestKind}, " +
+                              $"{capsuleInfo}, {boxInfo}, bounds={b.size}", mc);
+                    diagnosticRows.Add(FitDiagnosticRow(mc, meshName, bestKind, capsule, box, b));
+                }
+                else
+                {
+                    string meshName = mc.sharedMesh != null ? mc.sharedMesh.name : "<none>";
+                    Bounds b = mc.bounds;
+                    diagnosticRows.Add(FitDiagnosticRow(mc, meshName, bestKind, capsule, box, b));
+                }
             }
             catch (Exception e)
             {
@@ -444,6 +508,8 @@ public sealed class S4ColliderOptimizer : EditorWindow
 
         int beforeMerge = boxes.Count;
         boxes = MergeBoxes(boxes);
+
+        if (writeFitDiagnostics) WriteFitDiagnostics(root, diagnosticRows);
 
         if (boxes.Count == 0 && capsules.Count == 0 && spheres.Count == 0 && primitives.Count == 0 && lowPolyHulls.Count == 0)
         {
@@ -663,6 +729,84 @@ public sealed class S4ColliderOptimizer : EditorWindow
         fit.radialAspect <= 1.35f;
 
     // ---------- Helpers ----------
+
+    static float MaxAxisCoverage(Vector3 part, Vector3 whole)
+    {
+        float x = part.x / Mathf.Max(1e-6f, whole.x);
+        float y = part.y / Mathf.Max(1e-6f, whole.y);
+        float z = part.z / Mathf.Max(1e-6f, whole.z);
+        return Mathf.Max(x, Mathf.Max(y, z));
+    }
+
+    static Bounds CombinedSourceBounds(List<MeshCollider> colliders)
+    {
+        Bounds b = new Bounds(Vector3.zero, Vector3.zero);
+        bool has = false;
+        foreach (MeshCollider mc in colliders)
+        {
+            if (mc == null) continue;
+            if (!has) { b = mc.bounds; has = true; }
+            else b.Encapsulate(mc.bounds);
+        }
+        return has ? b : new Bounds(Vector3.zero, Vector3.one);
+    }
+
+    static string FitDiagnosticRow(MeshCollider mc, string meshName, string selected,
+                                   CapsuleFit capsule, BoxFit box, Bounds bounds)
+    {
+        string assetPath = mc != null && mc.sharedMesh != null
+            ? AssetDatabase.GetAssetPath(mc.sharedMesh) : "";
+        string cap = capsule == null ? "" :
+            $"{capsule.fill.ToString(System.Globalization.CultureInfo.InvariantCulture)};" +
+            $"{capsule.elongation.ToString(System.Globalization.CultureInfo.InvariantCulture)};" +
+            $"{capsule.radialAspect.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        string bx = box == null ? "" :
+            box.fill.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return string.Join("\t", new[]
+        {
+            mc != null ? mc.GetInstanceID().ToString() : "",
+            mc != null ? mc.name : "",
+            meshName ?? "",
+            assetPath ?? "",
+            selected ?? "",
+            cap,
+            bx,
+            bounds.min.x.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bounds.min.y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bounds.min.z.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bounds.max.x.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bounds.max.y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bounds.max.z.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bounds.size.x.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bounds.size.y.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            bounds.size.z.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        });
+    }
+
+    static void WriteFitDiagnostics(GameObject root, List<string> rows)
+    {
+        if (root == null || rows == null) return;
+        try
+        {
+            string dir = Path.Combine(Application.dataPath, "S4Extract_Data", "ColliderDiagnostics");
+            Directory.CreateDirectory(dir);
+            string safeName = string.IsNullOrEmpty(root.name) ? "root" : root.name;
+            foreach (char c in Path.GetInvalidFileNameChars()) safeName = safeName.Replace(c, '_');
+            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string path = Path.Combine(dir, $"{safeName}_{stamp}_{root.GetInstanceID()}.tsv");
+            var lines = new List<string> {
+                "instanceId\\tgameObject\\tmesh\\tassetPath\\tselected\\tcapsuleFill;elongation;radialAspect\\tboxFill\\tminX\\tminY\\tminZ\\tmaxX\\tmaxY\\tmaxZ\\tsizeX\\tsizeY\\tsizeZ"
+            };
+            lines.AddRange(rows);
+            File.WriteAllLines(path, lines);
+            AssetDatabase.ImportAsset("Assets/" + path.Substring(Application.dataPath.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Replace('\\', '/'));
+            Debug.Log($"[S4 fit] Saved diagnostics: {path}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[S4 fit] Could not save diagnostics: {e.Message}");
+        }
+    }
 
     static string DescribeCollider(MeshCollider mc)
     {
