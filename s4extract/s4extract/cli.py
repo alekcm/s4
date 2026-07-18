@@ -64,9 +64,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--static", action="store_true",
                     help="make prefab static (no Rigidbody)")
     ap.add_argument("--max-hulls", type=int, default=128,
-                    help="Max convex parts per object (default 128)")
+                    help="target convex-part budget; reports over-budget instead of deleting geometry (default 128)")
     ap.add_argument("--no-convex-merge", action="store_false", dest="merge_convex_neighbors",
                     help="keep every generated convex fragment; disable safe near-convex merging")
+    ap.add_argument("--merge-max-inflation", type=float, default=0.03,
+                    help="maximum empty-volume fraction introduced by a convex merge (default 0.03)")
+    ap.add_argument("--merge-contact-epsilon", type=float, default=0.002,
+                    help="maximum gap between merge candidates in model units (default 0.002)")
+    ap.add_argument("--merge-max-deviation-ratio", type=float, default=0.005,
+                    help="maximum convex bridge thickness relative to object diagonal (default 0.005)")
+    ap.add_argument("--max-verts-per-hull", type=int, default=64,
+                    help="maximum vertices allowed in a merged convex hull (default 64)")
     ap.add_argument("--concavity-threshold", type=float, default=0.20,
                     help="Concavity threshold for recursive decomposition (0.0=always split, 1.0=never split). "
                          "Lower values produce more, smaller collider parts. Default 0.20.")
@@ -112,7 +120,11 @@ def main(argv: list[str] | None = None) -> int:
         prefab=args.prefab,
         dynamic=not args.static,
         max_hulls=args.max_hulls,
+        max_verts_per_hull=args.max_verts_per_hull,
         merge_convex_neighbors=args.merge_convex_neighbors,
+        merge_max_inflation=args.merge_max_inflation,
+        merge_contact_epsilon=args.merge_contact_epsilon,
+        merge_max_deviation_ratio=args.merge_max_deviation_ratio,
         concavity_threshold=args.concavity_threshold,
         all_lods=args.all_lods,
         no_cas=args.no_cas,
@@ -139,6 +151,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  tex   {t['file']}: {t['status']}")
         for mat in rep["materials"]:
             print(f"  mat   {mat['file']} [{mat.get('pipeline','?')}] (diffuse={mat['diffuse']}, normal={mat['normal']})")
+        for collider in rep.get("colliders", []):
+            budget_note = (f", OVER BUDGET {collider['target_budget']}"
+                           if collider.get("over_budget") else "")
+            kinds = collider.get("kinds") or {}
+            kind_note = ", ".join(f"{k}={v}" for k, v in sorted(kinds.items()))
+            if kind_note:
+                kind_note = "; " + kind_note
+            print(f"  collider {collider['name']}: {collider['parts']} parts "
+                  f"[{collider['method']}{budget_note}{kind_note}]")
         for pf in rep.get("prefabs", []):
             print(f"  prefab {pf['file']}: collider={pf['collider_method']} "
                   f"({pf['collider_parts']} parts), dynamic={pf['dynamic']}")

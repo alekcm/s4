@@ -32,8 +32,11 @@ class Options:
     dynamic: bool = True
     max_hulls: int = 128
     merge_convex_neighbors: bool = True
+    merge_max_inflation: float = 0.03
+    merge_contact_epsilon: float = 0.002
+    merge_max_deviation_ratio: float = 0.005
+    max_verts_per_hull: int = 64
     all_lods: bool = True   # по умолчанию извлекаем все LOD-уровни
-    parts_prefab: bool = True
     no_cas: bool = True     # по умолчанию пропускаем CAS (одежда/волосы)
     extract_geom: bool = False  # по умолчанию не извлекаем GEOM (создаёт мусор "default")
     concavity_threshold: float = 0.20  # порог вогнутости для рекурсивного разбиения (0.0=все convex, 1.0=почти любой)
@@ -567,6 +570,19 @@ def extract_package(package_path: str, opt: Options) -> dict:
     out_root = os.path.join(opt.out_dir, f"[{id_str}] {base}")
     os.makedirs(out_root, exist_ok=True)
 
+    # PARTS/breakable exports are no longer part of the pipeline. Remove stale
+    # generated assets when reusing an output directory so Unity cannot import
+    # old part/broken meshes left by an earlier version.
+    import glob as _glob_cleanup
+    for pattern in ("*_part*.obj", "*_brokenA.obj", "*_brokenB.obj"):
+        for stale_obj in _glob_cleanup.glob(os.path.join(out_root, pattern)):
+            for stale in (stale_obj, stale_obj + ".meta"):
+                try:
+                    if os.path.exists(stale):
+                        os.remove(stale)
+                except OSError:
+                    pass
+
     report = {
         "package": package_path,
         "out_dir": out_root,
@@ -574,6 +590,7 @@ def extract_package(package_path: str, opt: Options) -> dict:
         "meshes": [],
         "textures": [],
         "materials": [],
+        "colliders": [],
         "prefabs": [],
         "raw": [],
         "errors": [],
@@ -645,8 +662,6 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 collected.append(_to_common_mesh(gm, rcol_obj=rcol_obj))
 
     mesh_records = []
-    part_records = []
-    break_specs = []
     # Only LOD0 is used for breakable-part/collider geometry. Other LODs
     # remain intact visual meshes.
     def _lod_index(mesh_name):
@@ -677,57 +692,6 @@ def extract_package(package_path: str, opt: Options) -> dict:
             entry["files"].append(os.path.basename(fbx_path))
         report["meshes"].append(entry)
 
-        parts = _group_parts_semantically(name, positions, normals, uvs, faces, min_faces_per_part=10) if opt.parts_prefab and _lod_index(name) == 0 else []
-        part_asset_names = []
-        if parts and len(parts) > 1:
-            for part in parts:
-                capped_part = close_open_boundaries(part)
-                pobj = os.path.join(out_root, capped_part.name + ".obj")
-                write_obj(capped_part, pobj)
-                part_asset_names.append(capped_part.name)
-                part_records.append({
-                    "asset_name": capped_part.name,
-                    "mesh_name": name,
-                    "positions": capped_part.positions,
-                    "faces": capped_part.faces,
-                })
-                broken = _fracture_mesh(capped_part)
-                broken_asset_names = []
-                for bp in broken:
-                    bp_path = os.path.join(out_root, bp.name + ".obj")
-                    write_obj(bp, bp_path)
-                    broken_asset_names.append(bp.name)
-                if broken_asset_names:
-                    break_specs.append({
-                        "intact_asset_name": capped_part.name,
-                        "mesh_name": name,
-                        "broken_asset_names": broken_asset_names,
-                    })
-        elif _lod_index(name) == 0:
-            base_part = close_open_boundaries(gm)
-            if opt.obj:
-                p = os.path.join(out_root, name + ".obj")
-                write_obj(base_part, p)
-            part_asset_names.append(name)
-            part_records.append({
-                "asset_name": name,
-                "mesh_name": name,
-                "positions": base_part.positions,
-                "faces": base_part.faces,
-            })
-            broken = _fracture_mesh(base_part)
-            broken_asset_names = []
-            for bp in broken:
-                bp_path = os.path.join(out_root, bp.name + ".obj")
-                write_obj(bp, bp_path)
-                broken_asset_names.append(bp.name)
-            if broken_asset_names:
-                break_specs.append({
-                    "intact_asset_name": name,
-                    "mesh_name": name,
-                    "broken_asset_names": broken_asset_names,
-                })
-
         mesh_records.append({
             "name": name,
             "fbx": fbx_path,
@@ -736,7 +700,6 @@ def extract_package(package_path: str, opt: Options) -> dict:
             "faces": faces,
             "material_ref": rec.get("material_ref"),
             "rcol": rec.get("rcol"),
-            "part_asset_names": part_asset_names,
         })
 
     png_files = []
@@ -761,6 +724,8 @@ def extract_package(package_path: str, opt: Options) -> dict:
     mesh_material_name_by_name = {}
     part_asset_material_pairs = []
     breakable_specs_with_material = []
+    # Must exist even when PNG/material export is disabled.
+    material_texture_pairs = []
     if opt.unity_mat and png_files:
         for p in png_files:
             if os.path.exists(p):
@@ -880,23 +845,6 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 if rec["name"] not in mesh_material_guid_by_name:
                     mesh_material_guid_by_name[rec["name"]] = material_guid
 
-        for rec in mesh_records:
-            mesh_mat_name = mesh_material_name_by_name.get(rec["name"])
-            if not mesh_mat_name:
-                continue
-            for asset_name in rec.get("part_asset_names", []):
-                part_asset_material_pairs.append((asset_name, mesh_mat_name))
-
-        for spec in break_specs:
-            mesh_mat_name = mesh_material_name_by_name.get(spec["mesh_name"])
-            if not mesh_mat_name:
-                continue
-            breakable_specs_with_material.append((
-                spec["intact_asset_name"],
-                mesh_mat_name,
-                list(spec.get("broken_asset_names", [])),
-            ))
-
         if material_texture_pairs:
             # === Новая batch-архитектура: JSON + единый Editor-скрипт ===
             export_data = {
@@ -905,12 +853,9 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 "assetName": os.path.basename(out_root).split("] ", 1)[-1] if "] " in os.path.basename(out_root) else os.path.basename(out_root),
                 "materials": [],
                 "meshNames": [rec["name"] for rec in mesh_records],
-                "meshMaterials": [{"meshName": mn, "materialName": matn} 
+                "colliderAssets": [],
+                "meshMaterials": [{"meshName": mn, "materialName": matn}
                                    for mn, matn in mesh_material_name_by_name.items()],
-                "partAssets": [{"assetName": an, "materialName": matn} 
-                              for an, matn in part_asset_material_pairs],
-                "breakSpecs": [{"intactAssetName": intact, "materialName": mat, "brokenAssetNames": broken}
-                              for intact, mat, broken in breakable_specs_with_material],
             }
             
             for mat_name, albedo_file, normal_file, mask_file in material_texture_pairs:
@@ -1085,28 +1030,101 @@ def extract_package(package_path: str, opt: Options) -> dict:
             unity.write_fbx_meta(rec["fbx"], mesh_material_guid_by_name.get(rec["name"], material_guid))
 
     if (opt.colliders or opt.prefab):
-        for rec in mesh_records:
-            name = rec["name"]
-            # Convex collider meshes are generated only from LOD0. LOD1+
-            # are visual-only and must stay as intact meshes.
-            if _lod_index(name) != 0:
-                continue
+        # All material/submesh groups belonging to LOD0 describe one physical
+        # object. Building colliders independently per g00/g01/... creates
+        # overlapping compounds at material boundaries, so aggregate them in
+        # root-local coordinates and generate exactly one collider set.
+        lod0_records = [rec for rec in mesh_records if _lod_index(rec["name"]) == 0]
+        if lod0_records:
+            owner = lod0_records[0]
+            name = owner["name"]
+            agg_positions = []
+            agg_normals = []
+            agg_faces = []
+            normals_complete = True
+            for rec in lod0_records:
+                offset = len(agg_positions)
+                positions = rec["positions"]
+                normals = rec.get("normals") or []
+                agg_positions.extend(positions)
+                agg_faces.extend(tuple(offset + vi for vi in face) for face in rec["faces"])
+                if len(normals) == len(positions):
+                    agg_normals.extend(normals)
+                else:
+                    normals_complete = False
+            if not normals_complete:
+                agg_normals = []
+
             cset = None
             collider_guids = []
+            collider_asset_names = []
             if opt.colliders:
-                cset = col.build_colliders(rec["positions"], rec["faces"],
-                                           normals=rec.get("normals"),
-                                           max_hulls=opt.max_hulls,
-                                           merge_convex_neighbors=opt.merge_convex_neighbors,
-                                           concavity_threshold=opt.concavity_threshold)
+                # Re-exporting into the same folder must not leave stale
+                # per-group collider assets; Unity FindAssets would otherwise
+                # attach both the old and new compounds.
+                import glob as _glob
+                for old_rec in lod0_records:
+                    pattern = os.path.join(out_root, old_rec["name"] + "_collider*.obj")
+                    for old_obj in _glob.glob(pattern):
+                        for stale in (old_obj, old_obj + ".meta"):
+                            try:
+                                if os.path.exists(stale):
+                                    os.remove(stale)
+                            except OSError:
+                                pass
+
+                cset = col.build_colliders(
+                    agg_positions, agg_faces,
+                    normals=agg_normals if agg_normals else None,
+                    max_hulls=opt.max_hulls,
+                    max_verts_per_hull=opt.max_verts_per_hull,
+                    merge_convex_neighbors=opt.merge_convex_neighbors,
+                    merge_max_inflation=opt.merge_max_inflation,
+                    merge_contact_epsilon=opt.merge_contact_epsilon,
+                    merge_max_deviation_ratio=opt.merge_max_deviation_ratio,
+                    concavity_threshold=opt.concavity_threshold)
                 for ci, part in enumerate(cset.convex_parts):
-                    cobj = os.path.join(out_root, f"{name}_collider{ci:02d}.obj")
+                    asset_name = f"{name}_collider{ci:02d}"
+                    cobj = os.path.join(out_root, asset_name + ".obj")
                     cguid = unity.write_collider_obj(cobj, part)
                     collider_guids.append(cguid)
+                    collider_asset_names.append(asset_name)
 
-            if opt.prefab and rec["fbx"]:
+                # Pin the exact current asset list in export JSON. Unity must
+                # not wildcard-load stale collider OBJ files left in a project
+                # after copying a newer export with fewer parts.
+                data_path = os.path.join(
+                    opt.out_dir, "S4Extract_Data", os.path.basename(out_root) + ".json")
+                if os.path.exists(data_path):
+                    try:
+                        with open(data_path, "r", encoding="utf-8") as f:
+                            export_payload = json.load(f)
+                        export_payload["colliderAssets"] = collider_asset_names
+                        with open(data_path, "w", encoding="utf-8") as f:
+                            json.dump(export_payload, f, indent=2, ensure_ascii=False)
+                    except Exception as ex:
+                        report["errors"].append(f"collider JSON update: {ex}")
+
+                kind_counts = {}
+                for part in cset.convex_parts:
+                    kind = getattr(part, "kind", "convex")
+                    kind_counts[kind] = kind_counts.get(kind, 0) + 1
+                report["colliders"].append({
+                    "name": name,
+                    "source_groups": len(lod0_records),
+                    "method": cset.method,
+                    "parts": len(cset.convex_parts),
+                    "kinds": kind_counts,
+                    "target_budget": opt.max_hulls,
+                    "over_budget": opt.max_hulls > 0 and len(cset.convex_parts) > opt.max_hulls,
+                })
+
+            # Legacy YAML prefab mode has one visual FBX owner. The normal batch
+            # READY-prefab path consumes all visual groups and finds these
+            # owner-prefixed aggregate colliders automatically.
+            if opt.prefab and owner["fbx"]:
                 rec_mat_guid = mesh_material_guid_by_name.get(name, material_guid)
-                fbx_guid = unity.write_fbx_meta(rec["fbx"], rec_mat_guid)
+                fbx_guid = unity.write_fbx_meta(owner["fbx"], rec_mat_guid)
                 prefab_path = os.path.join(out_root, name + ".prefab")
                 unity.write_prefab(
                     prefab_path, name, fbx_guid, rec_mat_guid,
