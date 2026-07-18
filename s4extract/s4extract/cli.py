@@ -67,6 +67,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="Max convex parts per object (default 128)")
     ap.add_argument("--no-convex-merge", action="store_false", dest="merge_convex_neighbors",
                     help="keep every generated convex fragment; disable safe near-convex merging")
+    ap.add_argument("--concavity-threshold", type=float, default=0.20,
+                    help="Concavity threshold for recursive decomposition (0.0=always split, 1.0=never split). "
+                         "Lower values produce more, smaller collider parts. Default 0.20.")
     # Defaults: all_lods=True (extract all LODs), no_cas=True (skip CAS), extract_geom=False
     ap.add_argument("--all-lods", action="store_true", default=True,
                     help="(default on) extract all LOD levels")
@@ -110,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         dynamic=not args.static,
         max_hulls=args.max_hulls,
         merge_convex_neighbors=args.merge_convex_neighbors,
+        concavity_threshold=args.concavity_threshold,
         all_lods=args.all_lods,
         no_cas=args.no_cas,
         extract_geom=args.geom,

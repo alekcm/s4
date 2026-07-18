@@ -36,6 +36,7 @@ class Options:
     parts_prefab: bool = True
     no_cas: bool = True     # по умолчанию пропускаем CAS (одежда/волосы)
     extract_geom: bool = False  # по умолчанию не извлекаем GEOM (создаёт мусор "default")
+    concavity_threshold: float = 0.20  # порог вогнутости для рекурсивного разбиения (0.0=все convex, 1.0=почти любой)
 
 
 import json
@@ -1096,7 +1097,8 @@ def extract_package(package_path: str, opt: Options) -> dict:
                 cset = col.build_colliders(rec["positions"], rec["faces"],
                                            normals=rec.get("normals"),
                                            max_hulls=opt.max_hulls,
-                                           merge_convex_neighbors=opt.merge_convex_neighbors)
+                                           merge_convex_neighbors=opt.merge_convex_neighbors,
+                                           concavity_threshold=opt.concavity_threshold)
                 for ci, part in enumerate(cset.convex_parts):
                     cobj = os.path.join(out_root, f"{name}_collider{ci:02d}.obj")
                     cguid = unity.write_collider_obj(cobj, part)

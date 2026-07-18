@@ -11,6 +11,11 @@ splits the mesh into its disconnected topological components while taking surfac
 normals into account to prevent perpendicular connected pieces (like a vertical pole
 meeting a flat base plate) from being welded together, producing extremely accurate
 hulls.
+
+When a connected component is still significantly concave (e.g. a chair whose
+legs and seat form one continuous mesh), a recursive convex decomposition step
+splits it along a plane through the deepest concavity, producing separate colliders
+for each leg and the seat.
 """
 from __future__ import annotations
 
@@ -54,14 +59,14 @@ def _thicken_vertices(vertices: list[tuple[float, float, float]], min_thickness:
     dx = max(xs) - min(xs)
     dy = max(ys) - min(ys)
     dz = max(zs) - min(zs)
-    
+
     min_val = min(dx, dy, dz)
     if min_val >= min_thickness:
         return vertices
-        
+
     thickened = [list(p) for p in vertices]
     half_thick = min_thickness * 0.5
-    
+
     if dx == min_val:
         mid_x = (min(xs) + max(xs)) * 0.5
         if dx < 1e-5:
@@ -86,7 +91,7 @@ def _thicken_vertices(vertices: list[tuple[float, float, float]], min_thickness:
         else:
             for i in range(len(thickened)):
                 thickened[i][2] = (mid_z - half_thick) if (thickened[i][2] <= mid_z) else (mid_z + half_thick)
-                
+
     return [tuple(p) for p in thickened]
 
 
@@ -133,8 +138,6 @@ def _merge_nearly_convex_neighbors(parts: list[ConvexPart],
             faces=[tuple(remap[int(i)] for i in simplex) for simplex in hull.simplices],
         ), float(hull.volume))
 
-    # Parts produced above are already hulls. Recalculate volume once so we can
-    # compare it with a candidate union hull.
     work = []
     for part in parts:
         try:
@@ -153,7 +156,6 @@ def _merge_nearly_convex_neighbors(parts: list[ConvexPart],
                 b, bvol = work[j]
                 if bvol is None or bvol <= 1e-9:
                     continue
-                # Do not use a hull to cross an actual opening in the model.
                 if _bbox_distance(a, b) > contact_epsilon:
                     continue
                 try:
@@ -168,24 +170,201 @@ def _merge_nearly_convex_neighbors(parts: list[ConvexPart],
         if best is None:
             break
         _, i, j, merged, volume = best
-        # Replace the pair and repeat. Greedy lowest-inflation first prevents a
-        # later, looser merge from consuming a more exact candidate.
         work[i] = (merged, volume)
         del work[j]
 
     return [part for part, _ in work]
 
 
+# ---------------------------------------------------------------------------
+# Recursive convex decomposition (simplified V-HACD)
+# ---------------------------------------------------------------------------
+
+def _compute_hull_concavity(positions: list) -> float:
+    """Estimate concavity of a set of 3D points.
+
+    Returns the fraction of vertices that lie *inside* the convex hull
+    (not on the hull surface).  Values near 0 = almost convex,
+    values > 0.3 = significantly concave.
+    """
+    import numpy as np
+    try:
+        from scipy.spatial import ConvexHull
+    except ImportError:
+        return 0.0
+
+    pts = np.asarray(positions, dtype=np.float64)
+    if len(pts) < 4:
+        return 0.0
+    try:
+        hull = ConvexHull(pts)
+    except Exception:
+        return 0.0
+
+    hull_vert_set = set(int(v) for v in hull.vertices)
+    interior = 0
+    for i, p in enumerate(pts):
+        if i in hull_vert_set:
+            continue
+        # Check if point is strictly inside all half-spaces
+        inside = True
+        for eq in hull.equations:
+            if eq[0] * p[0] + eq[1] * p[1] + eq[2] * p[2] + eq[3] > 1e-6:
+                inside = False
+                break
+        if inside:
+            interior += 1
+
+    return interior / len(pts) if len(pts) > 0 else 0.0
+
+
+def _split_faces_by_plane(positions, faces, face_ids, axis: int, position: float):
+    """Split face_ids into two lists: those whose centroid <= position and > position."""
+    left = []
+    right = []
+    for fi in face_ids:
+        a, b, c = faces[fi]
+        mid = (positions[a][axis] + positions[b][axis] + positions[c][axis]) / 3.0
+        if mid <= position:
+            left.append(fi)
+        else:
+            right.append(fi)
+    return left, right
+
+
+def _recursive_decompose(positions, faces, face_ids,
+                         depth: int = 0,
+                         max_depth: int = 4,
+                         min_faces: int = 10,
+                         concavity_threshold: float = 0.20) -> list:
+    """Recursively split a set of face indices into approximately convex groups.
+
+    Uses the fraction of interior vertices (vertices inside the convex hull
+    but not on its surface) as a concavity metric.  When a group exceeds
+    ``concavity_threshold`` it is split along the axis + position that
+    minimises the average concavity of the children.
+
+    Returns a list of face_id lists (each is one convex fragment).
+    """
+    if depth >= max_depth or len(face_ids) < min_faces:
+        return [face_ids]
+
+    # Collect unique vertex indices for this component
+    verts = sorted(set(vi for fi in face_ids for vi in faces[fi]))
+    if len(verts) < 8:
+        return [face_ids]
+
+    comp_pts = [positions[i] for i in verts]
+
+    # Early exit: if the component is already near-convex, stop recursing
+    concavity = _compute_hull_concavity(comp_pts)
+    if concavity < concavity_threshold:
+        return [face_ids]
+
+    # ---- Find best split ----
+    import numpy as np
+    pts_np = np.asarray(comp_pts, dtype=np.float64)
+
+    best_score = float('inf')
+    best_axis = 0
+    best_position = 0.0
+
+    for axis in range(3):
+        coords = pts_np[:, axis]
+        cmin, cmax = float(coords.min()), float(coords.max())
+        span = cmax - cmin
+        if span < 0.02:
+            continue
+
+        # Try multiple split positions along this axis
+        for fraction in (0.30, 0.40, 0.50, 0.60, 0.70):
+            pos = cmin + span * fraction
+            left_ids, right_ids = _split_faces_by_plane(positions, faces, face_ids, axis, pos)
+            if len(left_ids) < min_faces or len(right_ids) < min_faces:
+                continue
+
+            # Compute average concavity of the two halves
+            left_verts = sorted(set(vi for fi in left_ids for vi in faces[fi]))
+            right_verts = sorted(set(vi for fi in right_ids for vi in faces[fi]))
+            left_pts = [positions[i] for i in left_verts]
+            right_pts = [positions[i] for i in right_verts]
+
+            left_c = _compute_hull_concavity(left_pts)
+            right_c = _compute_hull_concavity(right_pts)
+            avg_concavity = (left_c + right_c) / 2.0
+
+            # Balance term: prefer splits where both sides have meaningful geometry
+            balance = min(len(left_ids), len(right_ids)) / max(len(left_ids), len(right_ids))
+
+            # Score: low concavity + good balance
+            score = avg_concavity * (2.0 - balance)
+            if score < best_score:
+                best_score = score
+                best_axis = axis
+                best_position = pos
+
+    if best_score >= float('inf') / 2:
+        # No valid split found
+        return [face_ids]
+
+    # Perform the best split
+    left_ids, right_ids = _split_faces_by_plane(positions, faces, face_ids, best_axis, best_position)
+
+    result = []
+    result.extend(_recursive_decompose(positions, faces, left_ids,
+                                       depth + 1, max_depth, min_faces, concavity_threshold))
+    result.extend(_recursive_decompose(positions, faces, right_ids,
+                                       depth + 1, max_depth, min_faces, concavity_threshold))
+    return result
+
+
+def _build_part_from_face_ids(positions, faces, face_ids):
+    """Build a ConvexPart (convex hull) from a set of face indices."""
+    import numpy as np
+    try:
+        from scipy.spatial import ConvexHull
+    except ImportError:
+        return None
+
+    used_verts = sorted(set(vi for fi in face_ids for vi in faces[fi]))
+    if len(used_verts) < 4:
+        return None
+
+    comp_pts = [positions[i] for i in used_verts]
+    pts = np.asarray(comp_pts, dtype=np.float64)
+    try:
+        hull = ConvexHull(pts)
+    except Exception:
+        return None
+
+    hv_idx = sorted(set(int(i) for i in hull.vertices))
+    remap = {old: new for new, old in enumerate(hv_idx)}
+    hverts = [tuple(map(float, pts[i])) for i in hv_idx]
+    hfaces = [tuple(remap[int(i)] for i in simplex) for simplex in hull.simplices]
+    return ConvexPart(vertices=hverts, faces=hfaces)
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
 def build_colliders(positions, faces,
                     normals: list[tuple[float, float, float]] | None = None,
                     max_hulls: int = 128,
                     max_verts_per_hull: int = 64,
-                    merge_convex_neighbors: bool = True) -> ColliderSet:
+                    merge_convex_neighbors: bool = True,
+                    concavity_threshold: float = 0.20) -> ColliderSet:
     """Return a ColliderSet split by connected components (loose parts).
 
     Tries to find connected components of the mesh (loose parts) with surface-normal
     filtering (to keep perpendicular parts like table poles vs bases separate),
     then builds convex hulls for each part via scipy.spatial.ConvexHull.
+
+    Components with significant concavity (e.g. a chair whose legs and seat are
+    one continuous mesh) are further split by a recursive convex decomposition
+    step that separates them into approximately convex fragments — the colliders
+    will follow the actual geometry (each leg separately + the seat) rather than
+    forming one giant convex blob.
     """
     cs = ColliderSet()
     cs.bbox_min, cs.bbox_max = _compute_bbox(positions)
@@ -196,20 +375,17 @@ def build_colliders(positions, faces,
 
     try:
         # Step 1: Weld duplicate vertex positions.
-        # If normals are provided, we only weld vertices if their normals are close
-        # (normal_threshold_cos = 0.15 representing ~80 degrees).
-        # This keeps perpendicular touching surfaces (like vertical cylinders on flat bases) separated.
         use_normals = normals is not None and len(normals) == len(positions)
         normal_threshold_cos = 0.15
         decimals = 5
-        
-        unique_pos_and_normal_to_idx = []  # list of (rounded_pos, normal, index)
+
+        unique_pos_and_normal_to_idx = []
         vertex_map = []
-        
+
         for i, p in enumerate(positions):
             rounded_p = (round(p[0], decimals), round(p[1], decimals), round(p[2], decimals))
             n = normals[i] if use_normals else (0.0, 1.0, 0.0)
-            
+
             found_idx = None
             if use_normals:
                 for up, un, uidx in unique_pos_and_normal_to_idx:
@@ -218,16 +394,15 @@ def build_colliders(positions, faces,
                             found_idx = uidx
                             break
             else:
-                # Fallback to position-only mapping
                 for up, un, uidx in unique_pos_and_normal_to_idx:
                     if up == rounded_p:
                         found_idx = uidx
                         break
-                        
+
             if found_idx is None:
                 found_idx = len(unique_pos_and_normal_to_idx)
                 unique_pos_and_normal_to_idx.append((rounded_p, n, found_idx))
-                
+
             vertex_map.append(found_idx)
 
         # Build adjacency: vertex index to faces
@@ -243,7 +418,7 @@ def build_colliders(positions, faces,
         # Step 2: Find connected components of faces (loose parts) using BFS
         seen = [False] * len(faces)
         components = []
-        
+
         for start_fi in range(len(faces)):
             if seen[start_fi]:
                 continue
@@ -262,13 +437,11 @@ def build_colliders(positions, faces,
                         if not seen[nfi]:
                             seen[nfi] = True
                             q.append(nfi)
-                            
+
             if comp_faces:
                 components.append(comp_faces)
 
         # Step 3: Rebuild local component lists and filter/merge tiny pieces.
-        # We merge "tiny" components (fewer than min_verts vertices, like screws/decorations)
-        # into the nearest larger component to avoid cluttering PhysX with too many colliders.
         min_verts = 12
         comp_list = []
         for comp_faces in components:
@@ -305,22 +478,18 @@ def build_colliders(positions, faces,
         else:
             final_comps = comp_list
 
-        # Step 4: For each remaining component, build a convex hull
+        # ------------------------------------------------------------------
+        # Step 4: For each remaining component, recursively decompose if
+        #         concave, then build convex hulls.
+        # ------------------------------------------------------------------
         good_parts = []
-        import numpy as np
-        has_scipy = False
-        try:
-            from scipy.spatial import ConvexHull
-            has_scipy = True
-        except ImportError:
-            pass
 
         for comp in final_comps:
             comp_faces = comp['faces']
             used_verts = comp['verts']
             if len(used_verts) < 4:
-                continue  # skip components with < 4 vertices (cannot cook a 3D convex hull)
-                
+                continue
+
             comp_pts = [positions[i] for i in used_verts]
             xs = [pt[0] for pt in comp_pts]
             ys = [pt[1] for pt in comp_pts]
@@ -330,26 +499,16 @@ def build_colliders(positions, faces,
             dz = max(zs) - min(zs)
             min_dim = min(dx, dy, dz)
             min_y = min(ys)
-            
-            # 1. Skip if it is a floor shadow plane (completely flat and sitting on the ground)
+
+            # 1. Skip floor shadow plane
             if min_y < 0.015 and dy < 0.005:
                 continue
-                
-            # 2. Skip if it is a small flat AO card / decorative helper
-            # (less than 8 vertices and very flat)
+
+            # 2. Skip small flat AO card
             if len(used_verts) < 8 and min_dim < 0.01:
                 continue
-                
-            # 3. Do not fabricate a 2 cm solid from a one-sided, zero-thickness
-            # render card. Sims objects contain many such helper/decal faces. A
-            # convex hull of one creates the conspicuous "phantom" wedges in
-            # Unity, often far larger than the visible face. Real shelves and
-            # glass normally have front/back faces and physical thickness, so
-            # they reach this point with a non-zero min_dim and are retained.
-            #
-            # Use geometric triangle normals here rather than imported vertex
-            # normals: vertex normals are split at UV seams and are unsuitable
-            # for deciding whether the component is a single render surface.
+
+            # 3. Skip one-sided zero-thickness render cards
             flat_epsilon = 1e-4
             if min_dim < flat_epsilon:
                 normal_sum = [0.0, 0.0, 0.0]
@@ -371,43 +530,96 @@ def build_colliders(positions, faces,
                         normal_count += 1
                 if normal_count:
                     coherence = math.sqrt(sum(v * v for v in normal_sum)) / normal_count
-                    # A value near 1 means every triangle faces the same way:
-                    # this is an open render card, not a solid object part.
                     if coherence > 0.95:
                         continue
 
-            # A non-flat thin surface is an actual piece of geometry. Give it
-            # the minimum volume required by Unity's convex MeshCollider.
-            if min_dim < 0.02:
-                comp_pts = _thicken_vertices(comp_pts, min_thickness=0.02)
-                
-            remap = {old: new for new, old in enumerate(used_verts)}
-            comp_tris = [tuple(remap[vi] for vi in faces[fi]) for fi in comp_faces]
-            
-            hull_built = False
-            if has_scipy and len(comp_pts) >= 4:
+            # --------------------------------------------------------------
+            # NEW: Recursive convex decomposition for concave components
+            # --------------------------------------------------------------
+            # Thresholds tuned for furniture: a chair with legs has ~40-60%
+            # interior vertices.  We split anything above 20%.
+            face_groups = _recursive_decompose(
+                positions, faces, comp_faces,
+                depth=0,
+                max_depth=4,
+                min_faces=10,
+                concavity_threshold=concavity_threshold,
+            )
+
+            for group_faces in face_groups:
+                group_verts = sorted(set(vi for fi in group_faces for vi in faces[fi]))
+                if len(group_verts) < 4:
+                    continue
+
+                group_pts = [positions[i] for i in group_verts]
+
+                # Re-apply thin-surface checks for each fragment
+                gxs = [pt[0] for pt in group_pts]
+                gys = [pt[1] for pt in group_pts]
+                gzs = [pt[2] for pt in group_pts]
+                gdx = max(gxs) - min(gxs)
+                gdy = max(gys) - min(gys)
+                gdz = max(gzs) - min(gzs)
+                gmin_dim = min(gdx, gdy, gdz)
+                gmin_y = min(gys)
+
+                if gmin_y < 0.015 and gdy < 0.005:
+                    continue
+                if len(group_verts) < 8 and gmin_dim < 0.01:
+                    continue
+
+                if gmin_dim < flat_epsilon:
+                    g_normal_sum = [0.0, 0.0, 0.0]
+                    g_normal_count = 0
+                    for ia, ib, ic in (faces[fi] for fi in group_faces):
+                        ax, ay, az = positions[ia]
+                        bx, by, bz = positions[ib]
+                        cx, cy, cz = positions[ic]
+                        ux, uy, uz = bx - ax, by - ay, bz - az
+                        vx, vy, vz = cx - ax, cy - ay, cz - az
+                        nx = uy * vz - uz * vy
+                        ny = uz * vx - ux * vz
+                        nz = ux * vy - uy * vx
+                        length = math.sqrt(nx * nx + ny * ny + nz * nz)
+                        if length > 1e-10:
+                            g_normal_sum[0] += nx / length
+                            g_normal_sum[1] += ny / length
+                            g_normal_sum[2] += nz / length
+                            g_normal_count += 1
+                    if g_normal_count:
+                        coherence = math.sqrt(sum(v * v for v in g_normal_sum)) / g_normal_count
+                        if coherence > 0.95:
+                            continue
+
+                if gmin_dim < 0.02:
+                    group_pts = _thicken_vertices(group_pts, min_thickness=0.02)
+
+                # Build convex hull for this fragment
+                remap = {old: new for new, old in enumerate(group_verts)}
+                group_tris = [tuple(remap[vi] for vi in faces[fi]) for fi in group_faces]
+
+                hull_built = False
+                import numpy as np
                 try:
-                    pts = np.asarray(comp_pts, dtype=np.float64)
-                    hull = ConvexHull(pts)
-                    hv_idx = sorted(set(int(i) for i in hull.vertices))
-                    hremap = {old: new for new, old in enumerate(hv_idx)}
-                    hverts = [tuple(map(float, pts[i])) for i in hv_idx]
-                    hfaces = []
-                    for simplex in hull.simplices:
-                        tri = tuple(hremap[int(i)] for i in simplex)
-                        hfaces.append(tri)
-                    good_parts.append(ConvexPart(vertices=hverts, faces=hfaces))
-                    hull_built = True
+                    from scipy.spatial import ConvexHull
+                    if len(group_pts) >= 4:
+                        pts = np.asarray(group_pts, dtype=np.float64)
+                        hull = ConvexHull(pts)
+                        hv_idx = sorted(set(int(i) for i in hull.vertices))
+                        hremap = {old: new for new, old in enumerate(hv_idx)}
+                        hverts = [tuple(map(float, pts[i])) for i in hv_idx]
+                        hfaces = [tuple(hremap[int(i)] for i in simplex) for simplex in hull.simplices]
+                        good_parts.append(ConvexPart(vertices=hverts, faces=hfaces))
+                        hull_built = True
+                except ImportError:
+                    pass
                 except Exception:
                     pass
-            
-            if not hull_built:
-                good_parts.append(ConvexPart(vertices=comp_pts, faces=comp_tris))
-                
+
+                if not hull_built:
+                    good_parts.append(ConvexPart(vertices=group_pts, faces=group_tris))
+
         if good_parts:
-            # Compound colliders are already the correct representation for a
-            # movable concave object. This pass only removes needless splits:
-            # it never joins shapes across a visible gap or a concavity.
             if merge_convex_neighbors:
                 good_parts = _merge_nearly_convex_neighbors(good_parts)
             if len(good_parts) > max_hulls:
