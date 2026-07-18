@@ -937,6 +937,32 @@ def _fracture_mesh(mesh: GeomMesh):
     return []
 
 
+def get_lod_index(name: str) -> int:
+    """Parse the LOD level from an exported mesh name.
+
+    Exporter names models ``<asset>_lodNN_gNN``; legacy exports may still use
+    ``mlodNN`` / ``modlNN``.  Returns -1 when no LOD marker is found.
+    """
+    if not name:
+        return -1
+    n = name.lower()
+    markers = ("_lod", "mlod", "modl")
+    for marker in markers:
+        at = n.rfind(marker)
+        if at < 0:
+            continue
+        pos = at + len(marker)
+        value = 0
+        digits = 0
+        while pos < len(n) and n[pos].isdigit():
+            value = value * 10 + int(n[pos])
+            digits += 1
+            pos += 1
+        if digits > 0:
+            return value
+    return -1
+
+
 def extract_package(package_path: str, opt: Options) -> dict:
     pkg = DBPF.from_file(package_path)
     base = os.path.splitext(os.path.basename(package_path))[0]
@@ -1294,66 +1320,63 @@ def extract_package(package_path: str, opt: Options) -> dict:
         material_texture_pairs = []
         material_pair_owners = []   # [(owner_mesh_or_None, pair)] — для пообъектных JSON
 
-        families = {}
+        # --- Materials, de-duplicated by texture content across all LODs ---
+        # One material is created per unique (diffuse, normal, specular) set, so
+        # LOD0 / LOD1 / ... that share the same textures REUSE the same .mat
+        # instead of each LOD emitting its own identical copy.
+        mat_by_content = {}
+        used_mat_names = set()
         for rec in mesh_records:
             if rec.get("rcol") is None or rec.get("material_ref") is None:
                 continue
-            fam_key = (id(rec["rcol"]), rec["material_ref"])
-            if fam_key not in families:
-                families[fam_key] = {
-                    "label": rec["name"],
-                    "variants": material_variants(rec["rcol"], rec["material_ref"]),
-                }
-
-        family_guids = {}
-        family_names = {}
-        for fam_key, fam in families.items():
-            label = fam["label"]
-            guids = []
-            names = []
-            created_i = 0
-            for mv in (fam.get("variants") or []):
+            try:
+                variants = material_variants(rec["rcol"], rec["material_ref"])
+            except Exception:
+                variants = []
+            for mv in (variants or []):
                 diffuse = texture_by_key.get(mv.diffuse_key) if mv.diffuse_key else None
                 normal = texture_by_key.get(mv.normal_key) if mv.normal_key else None
                 specular = texture_by_key.get(mv.specular_key) if mv.specular_key else None
                 if diffuse is None:
                     continue
-                mi = created_i
-                created_i += 1
-                mat_name = f"{label}_swatch{mi:02d}_material"
-                mat_path = os.path.join(folder_for(label), mat_name + ".mat")
-                unity.write_material(
-                    mat_path, mat_name, pipeline=opt.mat_pipeline,
-                    diffuse_png=diffuse, normal_png=normal, specular_png=specular)
-                guid = unity._guid_for(os.path.basename(mat_path))
-                guids.append(guid)
-                names.append(mat_name)
-                pair = (
-                    mat_name,
-                    os.path.basename(diffuse) if diffuse else "",
-                    os.path.basename(normal) if normal else None,
-                    os.path.basename(specular) if specular else None)
-                material_texture_pairs.append(pair)
-                material_pair_owners.append((label, pair))
-                if material_guid is None:
-                    material_guid = guid
-                report["materials"].append({
-                    "name": mat_name,
-                    "pipeline": opt.mat_pipeline,
-                    "swatch": mi,
-                    "file": os.path.basename(mat_path),
-                    "diffuse": os.path.basename(diffuse) if diffuse else None,
-                    "normal": os.path.basename(normal) if normal else None,
-                    "specular": os.path.basename(specular) if specular else None})
-            if guids:
-                family_guids[fam_key] = guids
-                family_names[fam_key] = names
-
-        for rec in mesh_records:
-            fam_key = (id(rec.get("rcol")), rec.get("material_ref"))
-            if fam_key in family_guids:
-                mesh_material_guid_by_name[rec["name"]] = family_guids[fam_key][0]
-                mesh_material_name_by_name[rec["name"]] = family_names[fam_key][0]
+                content_key = (os.path.basename(diffuse),
+                               os.path.basename(normal) if normal else None,
+                               os.path.basename(specular) if specular else None)
+                if content_key not in mat_by_content:
+                    base = os.path.splitext(os.path.basename(diffuse))[0]
+                    mat_name = f"{base}_material"
+                    n = 2
+                    while mat_name in used_mat_names:
+                        mat_name = f"{base}_{n}_material"
+                        n += 1
+                    used_mat_names.add(mat_name)
+                    mat_path = os.path.join(folder_for(rec["name"]), mat_name + ".mat")
+                    unity.write_material(
+                        mat_path, mat_name, pipeline=opt.mat_pipeline,
+                        diffuse_png=diffuse, normal_png=normal, specular_png=specular)
+                    guid = unity._guid_for(os.path.basename(mat_path))
+                    pair = (
+                        mat_name,
+                        os.path.basename(diffuse) if diffuse else "",
+                        os.path.basename(normal) if normal else None,
+                        os.path.basename(specular) if specular else None)
+                    mat_by_content[content_key] = (mat_name, guid, pair)
+                    material_texture_pairs.append(pair)
+                    material_pair_owners.append((rec["name"], pair))
+                    if material_guid is None:
+                        material_guid = guid
+                    report["materials"].append({
+                        "name": mat_name,
+                        "pipeline": opt.mat_pipeline,
+                        "swatch": len(mat_by_content) - 1,
+                        "file": os.path.basename(mat_path),
+                        "diffuse": os.path.basename(diffuse) if diffuse else None,
+                        "normal": os.path.basename(normal) if normal else None,
+                        "specular": os.path.basename(specular) if specular else None})
+                mat_name, guid, pair = mat_by_content[content_key]
+                if rec["name"] not in mesh_material_guid_by_name:
+                    mesh_material_guid_by_name[rec["name"]] = guid
+                    mesh_material_name_by_name[rec["name"]] = mat_name
 
         if not material_texture_pairs:
             normal = specular = None
@@ -1429,87 +1452,112 @@ def extract_package(package_path: str, opt: Options) -> dict:
             ))
             break_owner_mesh[spec["intact_asset_name"]] = spec["mesh_name"]
 
-        if material_texture_pairs:
-            # === batch-архитектура: JSON + единый Editor-скрипт ===
-            # При пообъектных папках пишем ОДИН JSON НА ОБЪЕКТ — фиксер в Unity
-            # создаст по префабу на объект прямо в папке этого объекта (папка
-            # префаба берётся из расположения материала). Однообъектные паки —
-            # единый JSON на пак, как раньше.
+        # =====================================================================
+        # Final "READY" prefab — generated directly here (no Unity "Fix" step).
+        # Contains every LOD as a child GameObject (so distant LODs still
+        # render on the scene), the shared HDRP/Lit materials, a LODGroup, and
+        # compound colliders built ONLY from LOD0 (the most detailed visual
+        # mesh), matching the visual as closely as possible.
+        # =====================================================================
+        if mesh_records and (material_texture_pairs or opt.colliders):
+            # One runtime script per export (unique GUID) so the prefab can
+            # carry an S4Identity component without a GUID clash between packs.
+            identity_guid = unity.write_s4identity_script(out_root, id_str, asset_base)
+            try:
+                identity_id_int = int(id_str)
+            except Exception:
+                identity_id_int = 0
+
+            # Build the same per-object / rest buckets used above.
             root_basename = os.path.basename(out_root)
             root_asset_name = (root_basename.split("] ", 1)[-1]
                                if "] " in root_basename else root_basename)
             rest_mesh_names = [rec["name"] for rec in mesh_records
                                if mesh_family.get(rec["name"]) is None]
-            palette_count = sum(1 for owner, _ in material_pair_owners if owner is None)
 
-            buckets = []  # (папка_ассетов, folderName, assetName, mesh_names)
+            buckets = []  # (folder, folderName, assetName, [rec, ...])
             if per_object_dirs:
                 for fam in obj_families:
                     slug = fam.get("slug")
                     if not slug:
                         continue
-                    meshes = [rec["name"] for rec in mesh_records
-                              if mesh_family.get(rec["name"]) == slug]
-                    buckets.append((folder_for_slug(slug), slug, slug, meshes))
-            if rest_mesh_names or not buckets or palette_count:
-                all_names = ([rec["name"] for rec in mesh_records]
-                             if not per_object_dirs else rest_mesh_names)
-                buckets.append((out_root, root_basename, root_asset_name, all_names))
+                    recs = [rec for rec in mesh_records
+                            if mesh_family.get(rec["name"]) == slug]
+                    buckets.append((folder_for_slug(slug), slug, slug, recs))
+            if rest_mesh_names or not buckets:
+                recs = ([rec for rec in mesh_records]
+                        if not per_object_dirs
+                        else [rec for rec in mesh_records
+                              if mesh_family.get(rec["name"]) is None])
+                buckets.append((out_root, root_basename, root_asset_name, recs))
 
-            json_paths = []
-            for b_dir, b_folder, b_asset, b_meshes in buckets:
-                mesh_set = set(b_meshes)
-                b_mats = []
-                for owner, pair in material_pair_owners:
-                    if owner is None:
-                        if not per_object_dirs or b_dir == out_root:
-                            b_mats.append(pair)
-                    elif owner in mesh_set:
-                        b_mats.append(pair)
-                if not b_mats:
+            for b_dir, b_folder, b_asset, b_recs in buckets:
+                if not b_recs:
                     continue
 
-                export_data = {
-                    "folderName": b_folder,
-                    "id": id_str,
-                    "assetName": b_asset,
-                    "materials": [],
-                    "meshNames": b_meshes,
-                    "meshMaterials": [{"meshName": mn, "materialName": matn}
-                                       for mn, matn in mesh_material_name_by_name.items()
-                                       if mn in mesh_set],
-                    "partAssets": [{"assetName": an, "materialName": matn}
-                                   for an, matn in part_asset_material_pairs
-                                   if part_owner_mesh.get(an) in mesh_set],
-                    "breakSpecs": [{"intactAssetName": intact, "materialName": mat,
-                                    "brokenAssetNames": broken}
-                                   for intact, mat, broken in breakable_specs_with_material
-                                   if break_owner_mesh.get(intact) in mesh_set],
-                }
+                # Colliders: LOD0 only.
+                collider_guids = []
+                lod0_bbox = None
+                if opt.colliders:
+                    for rec in b_recs:
+                        if get_lod_index(rec["name"]) != 0:
+                            continue
+                        if not rec.get("positions") or not rec.get("faces"):
+                            continue
+                        cset = col.build_colliders(rec["positions"], rec["faces"],
+                                                   normals=rec.get("normals"),
+                                                   max_hulls=opt.max_hulls,
+                                                   merge_convex_neighbors=opt.merge_convex_neighbors)
+                        for ci, part in enumerate(cset.convex_parts):
+                            cobj = os.path.join(b_dir, f"{rec['name']}_collider{ci:02d}.obj")
+                            cguid = unity.write_collider_obj(cobj, part)
+                            collider_guids.append(cguid)
+                        if rec["positions"]:
+                            xs = [p[0] for p in rec["positions"]]
+                            ys = [p[1] for p in rec["positions"]]
+                            zs = [p[2] for p in rec["positions"]]
+                            bb = (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
+                            if lod0_bbox is None:
+                                lod0_bbox = list(bb)
+                            else:
+                                lod0_bbox[0] = min(lod0_bbox[0], bb[0]); lod0_bbox[1] = min(lod0_bbox[1], bb[1]); lod0_bbox[2] = min(lod0_bbox[2], bb[2])
+                                lod0_bbox[3] = max(lod0_bbox[3], bb[3]); lod0_bbox[4] = max(lod0_bbox[4], bb[4]); lod0_bbox[5] = max(lod0_bbox[5], bb[5])
 
-                for mat_name, albedo_file, normal_file, mask_file in b_mats:
-                    export_data["materials"].append({
-                        "materialName": mat_name,
-                        "albedoName": os.path.splitext(albedo_file)[0] if albedo_file else "",
-                        "normalName": os.path.splitext(normal_file)[0] if normal_file else "",
-                        "maskName": os.path.splitext(mask_file)[0] if mask_file else "",
+                # FBX meta + LOD specs for the prefab.
+                lod_mesh_specs = []
+                for rec in b_recs:
+                    if not rec.get("fbx"):
+                        continue
+                    fbx_guid = unity.write_fbx_meta(rec["fbx"],
+                                                    mesh_material_guid_by_name.get(rec["name"], material_guid))
+                    lod_mesh_specs.append({
+                        "mesh_name": rec["name"],
+                        "fbx_guid": fbx_guid,
+                        "material_guid": mesh_material_guid_by_name.get(rec["name"], material_guid),
+                        "lod_index": get_lod_index(rec["name"]),
                     })
 
-                json_path = unity.write_export_json(b_dir, export_data, opt.out_dir)
-                json_paths.append(json_path)
+                if not lod_mesh_specs:
+                    continue
 
-            if json_paths:
-                batch_script = unity.write_batch_editor_script(opt.out_dir, opt.mat_pipeline)
-                for json_path in json_paths:
-                    report["materials"].append({
-                        "name": "S4ExtractBatchFixer",
-                        "pipeline": opt.mat_pipeline,
-                        "file": os.path.relpath(batch_script, out_root).replace(os.sep, "/"),
-                        "data_file": os.path.relpath(json_path, out_root).replace(os.sep, "/"),
-                        "diffuse": None,
-                        "normal": None,
-                        "specular": None,
-                    })
+                prefab_name = f"{b_asset}_READY"
+                prefab_path = os.path.join(b_dir, prefab_name + ".prefab")
+                unity.write_ready_prefab(
+                    prefab_path, prefab_name,
+                    lod_mesh_specs=lod_mesh_specs,
+                    collider_guids=collider_guids,
+                    lod0_bbox=tuple(lod0_bbox) if lod0_bbox else None,
+                    dynamic=opt.dynamic,
+                    identity=(identity_id_int, b_asset),
+                    identity_script_guid=identity_guid)
+                report["prefabs"].append({
+                    "name": prefab_name,
+                    "file": os.path.relpath(prefab_path, out_root).replace(os.sep, "/"),
+                    "collider_method": "loose_parts",
+                    "collider_parts": len(collider_guids),
+                    "lods": len({s["lod_index"] for s in lod_mesh_specs if s["lod_index"] >= 0}),
+                    "dynamic": opt.dynamic,
+                })
 
     # Update catalog entry colors in the database with automatic dominant color detection
     if material_texture_pairs:
@@ -1655,39 +1703,5 @@ def extract_package(package_path: str, opt: Options) -> dict:
                     json.dump(db, f, indent=2, ensure_ascii=False)
             except Exception:
                 pass
-
-    for rec in mesh_records:
-        if rec.get("fbx"):
-            unity.write_fbx_meta(rec["fbx"], mesh_material_guid_by_name.get(rec["name"], material_guid))
-
-    if (opt.colliders or opt.prefab):
-        for rec in mesh_records:
-            name = rec["name"]
-            cset = None
-            collider_guids = []
-            if opt.colliders:
-                cset = col.build_colliders(rec["positions"], rec["faces"],
-                                           normals=rec.get("normals"),
-                                           max_hulls=opt.max_hulls,
-                                           merge_convex_neighbors=opt.merge_convex_neighbors)
-                for ci, part in enumerate(cset.convex_parts):
-                    cobj = os.path.join(folder_for(name), f"{name}_collider{ci:02d}.obj")
-                    cguid = unity.write_collider_obj(cobj, part)
-                    collider_guids.append(cguid)
-
-            if opt.prefab and rec["fbx"]:
-                rec_mat_guid = mesh_material_guid_by_name.get(name, material_guid)
-                fbx_guid = unity.write_fbx_meta(rec["fbx"], rec_mat_guid)
-                prefab_path = os.path.join(folder_for(name), name + ".prefab")
-                unity.write_prefab(
-                    prefab_path, name, fbx_guid, rec_mat_guid,
-                    cset, collider_guids, dynamic=opt.dynamic)
-                report["prefabs"].append({
-                    "name": name,
-                    "file": os.path.basename(prefab_path),
-                    "collider_method": cset.method if cset else "none",
-                    "collider_parts": len(collider_guids),
-                    "dynamic": opt.dynamic,
-                })
 
     return report
