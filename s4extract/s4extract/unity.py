@@ -331,6 +331,8 @@ def write_collider_obj(obj_path: str, part) -> str:
 
     Returns the GUID. The first imported Mesh in an .obj has fileID 4300000.
     """
+    if not part or not part.vertices or not part.faces:
+        return ""
     kind = getattr(part, "kind", "convex")
     if kind == "hollow_lathe":
         object_name = "collider_hollow_parametric_keep"
