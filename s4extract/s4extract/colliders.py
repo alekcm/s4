@@ -365,9 +365,9 @@ def _split_at_concave_edges(positions, faces, face_ids, vertex_map,
         b0 = positions[faces[fb][0]]
         da = _dot(normals[fa], (b_third_pos[0]-a0[0], b_third_pos[1]-a0[1], b_third_pos[2]-a0[2]))
         db = _dot(normals[fb], (a_third_pos[0]-b0[0], a_third_pos[1]-b0[1], a_third_pos[2]-b0[2]))
-        # Requiring both tests to agree avoids cutting on inconsistent winding
-        # or noisy nearly-coplanar triangles.
-        if da > epsilon and db > epsilon:
+        # FIXED: было строго AND, теперь мягче OR - разделяет ножки соединённые планкой
+        # даже при несогласованном winding
+        if (da > epsilon or db > epsilon) and (da > -epsilon*0.5 or db > -epsilon*0.5):
             blocked.add((min(fa,fb), max(fa,fb)))
 
     if not blocked:
@@ -401,6 +401,63 @@ def _split_at_concave_edges(positions, faces, face_ids, vertex_map,
     # is safer in that case.
     meaningful = [g for g in groups if len(g) >= 4]
     return groups if len(meaningful) >= 2 and len(meaningful) == len(groups) else [face_ids]
+
+
+
+def _split_by_spatial_gaps(positions, faces, face_ids, min_gap=0.06, min_gap_ratio=0.12, min_faces_per_side=4):
+    """FIX: ищет большие пустые промежутки в X и Z и режет по ним.
+    Для chair.package: gap 0.08м вокруг X=0 разделяет левые/правые ножки,
+    gap 0.08м по Z разделяет передние/задние.
+    """
+    if len(face_ids) < 6:
+        return [face_ids]
+    centroids = []
+    for fi in face_ids:
+        a,b,c = faces[fi]
+        cx = (positions[a][0]+positions[b][0]+positions[c][0])/3.0
+        cy = (positions[a][1]+positions[b][1]+positions[c][1])/3.0
+        cz = (positions[a][2]+positions[b][2]+positions[c][2])/3.0
+        centroids.append((cx,cy,cz,fi))
+    best_gap = 0
+    best_split = None
+    for axis in (0, 2):  # X,Z
+        sorted_c = sorted(centroids, key=lambda x: x[axis])
+        span = sorted_c[-1][axis] - sorted_c[0][axis]
+        if span < 0.05:
+            continue
+        max_gap = 0
+        max_gap_idx = -1
+        for i in range(1, len(sorted_c)):
+            gap = sorted_c[i][axis] - sorted_c[i-1][axis]
+            if gap > max_gap:
+                max_gap = gap
+                max_gap_idx = i
+        if max_gap > min_gap and max_gap > span * min_gap_ratio:
+            left = max_gap_idx
+            right = len(sorted_c) - max_gap_idx
+            if left >= min_faces_per_side and right >= min_faces_per_side:
+                if max_gap_idx > len(sorted_c)*0.1 and max_gap_idx < len(sorted_c)*0.9:
+                    if max_gap > best_gap:
+                        best_gap = max_gap
+                        left_ids = [c[3] for c in sorted_c[:max_gap_idx]]
+                        right_ids = [c[3] for c in sorted_c[max_gap_idx:]]
+                        best_split = (left_ids, right_ids)
+    if best_split:
+        return list(best_split)
+    return [face_ids]
+
+
+def _recursive_gap_split(positions, faces, face_ids, depth=0, max_depth=4, min_gap=0.06):
+    """Рекурсивно применяет gap-split чтобы разделить 4 ножки стула"""
+    if depth >= max_depth or len(face_ids) < 10:
+        return [face_ids]
+    splits = _split_by_spatial_gaps(positions, faces, face_ids, min_gap=min_gap)
+    if len(splits) == 1:
+        return [face_ids]
+    result = []
+    for sub in splits:
+        result.extend(_recursive_gap_split(positions, faces, sub, depth+1, max_depth, min_gap))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -834,9 +891,9 @@ def _split_faces_by_plane(positions, faces, face_ids, axis: int, position: float
 
 def _recursive_decompose(positions, faces, face_ids,
                          depth: int = 0,
-                         max_depth: int = 4,
+                         max_depth: int = 5,
                          min_faces: int = 10,
-                         concavity_threshold: float = 0.20) -> list:
+                         concavity_threshold: float = 0.15) -> list:
     """Recursively split a set of face indices into approximately convex groups.
 
     Uses the fraction of interior vertices (vertices inside the convex hull
@@ -859,7 +916,23 @@ def _recursive_decompose(positions, faces, face_ids,
     # Early exit: if the component is already near-convex, stop recursing
     concavity = _compute_hull_concavity(comp_pts)
     if concavity < concavity_threshold:
+        # FIX: даже если concavity низкая, пробуем gap-split для рамок стула с дыркой
+        gap_split = _split_by_spatial_gaps(positions, faces, face_ids)
+        if len(gap_split) >= 2:
+            result = []
+            for sub in gap_split:
+                result.extend(_recursive_decompose(positions, faces, sub, depth+1, max_depth, min_faces, concavity_threshold))
+            return result
         return [face_ids]
+
+    # FIX: сначала пробуем gap-based split (наиболее эффективен для ножек)
+    gap_split = _split_by_spatial_gaps(positions, faces, face_ids)
+    if len(gap_split) >= 2:
+        if all(len(g) >= min_faces for g in gap_split):
+            result = []
+            for sub in gap_split:
+                result.extend(_recursive_decompose(positions, faces, sub, depth+1, max_depth, min_faces, concavity_threshold))
+            return result
 
     # ---- Find best split ----
     import numpy as np
@@ -1044,13 +1117,16 @@ def build_colliders(positions, faces,
             if comp_faces:
                 components.append(comp_faces)
 
-        # Step 2b: split connected meshes at genuine inward seams. This is the
+        # Step 2b: FIXED - split at concave seams + spatial gaps
         # direct surface segmentation pass for models whose legs/seat/back were
         # authored as one manifold mesh.
         refined_components = []
         for comp_faces in components:
-            refined_components.extend(_split_at_concave_edges(
-                positions, faces, comp_faces, vertex_map))
+            # Сначала gap-split (разделяет 4 ножки)
+            gap_parts = _recursive_gap_split(positions, faces, comp_faces, max_depth=4)
+            for gp in gap_parts:
+                refined_components.extend(_split_at_concave_edges(
+                    positions, faces, gp, vertex_map))
         components = refined_components
 
         # Step 3: Rebuild local component lists and filter/merge tiny pieces.
