@@ -567,18 +567,7 @@ public sealed class S4ColliderOptimizer : EditorWindow
             sphere.center = Vector3.zero;
             sphere.radius = fit.radius;
         }
-        for (int i = 0; i < lowPolyHulls.Count; i++)
-        {
-            LowPolyFit fit = lowPolyHulls[i];
-            var child = new GameObject($"LowPolyHull_{i:000}");
-            child.transform.SetParent(generated.transform, false);
-            child.transform.localPosition = fit.center;
-            child.transform.localRotation = Quaternion.identity;
-            child.transform.localScale = Vector3.one;
-            MeshCollider hull = useUndo ? Undo.AddComponent<MeshCollider>(child) : child.AddComponent<MeshCollider>();
-            hull.sharedMesh = fit.mesh;
-            hull.convex = true;
-        }
+
         for (int i = 0; i < primitives.Count; i++)
         {
             var fit = primitives[i];

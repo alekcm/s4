@@ -1,6 +1,6 @@
 ======================================== 
  s4extract HDRP launcher 
- Time: 18.07.2026 23:46:02,46 
+ Time: 20.07.2026  1:31:58,66 
  Working dir: A:\s4extract 
 ======================================== 
  
@@ -9,7 +9,7 @@ Python 3.13.7
 Python location: 
 C:\Windows\py.exe
  
-Input file: C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-One Styling Station\model.package 
+Input file: C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package 
 Input exists: 
 YES 
  
@@ -29,56 +29,90 @@ vhacdx: OK
 Dependencies check complete 
  
 [3/4] Starting extraction... 
-File: C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-One Styling Station\model.package 
+File: C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package 
  
 
-=== C:\Users\Алекс\Desktop\для гита\Для нарезки\All-in-One Styling Station\model.package ===
-  -> extracted\[0002] model
-  resources: 60
-  mesh  model_lod00_g01: 2013 verts, 1585 faces -> model_lod00_g01.obj, model_lod00_g01.fbx
-  mesh  model_lod00_g02: 579 verts, 387 faces -> model_lod00_g02.obj, model_lod00_g02.fbx
-  mesh  model_lod01_g01: 1296 verts, 821 faces -> model_lod01_g01.obj, model_lod01_g01.fbx
-  mesh  model_lod01_g02: 294 verts, 184 faces -> model_lod01_g02.obj, model_lod01_g02.fbx
-  tex   model_tex00.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex01.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex02.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex03.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex04.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex05.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex06.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex07.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex08.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex09.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex10.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex11.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex12.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex13.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex14.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
-  tex   model_tex15.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
-  mat   model_lod00_g01_swatch00_material.mat [hdrp] (diffuse=model_tex00.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch01_material.mat [hdrp] (diffuse=model_tex03.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch02_material.mat [hdrp] (diffuse=model_tex04.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch03_material.mat [hdrp] (diffuse=model_tex05.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch04_material.mat [hdrp] (diffuse=model_tex06.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch05_material.mat [hdrp] (diffuse=model_tex07.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch06_material.mat [hdrp] (diffuse=model_tex08.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch07_material.mat [hdrp] (diffuse=model_tex09.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch08_material.mat [hdrp] (diffuse=model_tex10.png, normal=model_tex01.png)
-  mat   model_lod00_g01_swatch09_material.mat [hdrp] (diffuse=model_tex11.png, normal=model_tex01.png)
-  mat   model_lod00_g02_swatch00_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch01_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch02_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch03_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch04_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch05_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch06_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch07_material.mat [hdrp] (diffuse=model_tex15.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch08_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
-  mat   model_lod00_g02_swatch09_material.mat [hdrp] (diffuse=model_tex12.png, normal=model_tex13.png)
+=== C:\Users\Алекс\Desktop\для гита\Для нарезки\chair.package ===
+  -> extracted\[0001] Arrrmless Dining Chair
+  resources: 131
+  mesh  Arrrmless Dining Chair_lod00_g01: 829 verts, 730 faces -> Arrrmless Dining Chair_lod00_g01.obj, Arrrmless Dining Chair_lod00_g01.fbx
+  mesh  Arrrmless Dining Chair_lod01_g01: 454 verts, 338 faces -> Arrrmless Dining Chair_lod01_g01.obj, Arrrmless Dining Chair_lod01_g01.fbx
+  mesh  Arrrmless Dining Chair_lod02_g01: 281 verts, 178 faces -> Arrrmless Dining Chair_lod02_g01.obj, Arrrmless Dining Chair_lod02_g01.fbx
+  tex   Arrrmless Dining Chair_tex00.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex01.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex02.png: unshuffled DST5 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex03.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex04.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex05.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex06.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex07.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex08.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex09.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex10.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex11.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex12.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex13.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex14.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex15.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex16.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex17.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex18.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex19.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex20.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex21.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex22.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex23.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex24.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex25.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex26.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex27.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex28.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex29.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex30.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex31.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex32.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex33.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex34.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex35.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  tex   Arrrmless Dining Chair_tex36.png: unshuffled DST1 -> decoded DDS (RGBA) -> PNG via Pillow
+  mat   Arrrmless Dining Chair_lod00_g01_swatch00_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex00.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch01_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex03.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch02_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex04.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch03_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex05.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch04_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex06.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch05_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex07.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch06_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex08.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch07_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex09.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch08_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex10.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch09_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex11.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch10_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex13.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch11_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex14.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch12_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex15.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch13_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex16.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch14_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex17.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch15_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex18.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch16_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex19.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch17_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex20.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch18_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex21.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch19_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex22.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch20_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex23.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch21_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex24.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch22_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex25.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch23_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex26.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch24_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex27.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch25_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex28.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch26_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex29.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch27_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex30.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch28_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex31.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch29_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex32.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch30_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex33.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch31_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex34.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch32_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex35.png, normal=Arrrmless Dining Chair_tex01.png)
+  mat   Arrrmless Dining Chair_lod00_g01_swatch33_material.mat [hdrp] (diffuse=Arrrmless Dining Chair_tex36.png, normal=Arrrmless Dining Chair_tex01.png)
   mat   ../S4Extract_Data/Editor/S4ExtractBatchFixer.cs [hdrp] (diffuse=None, normal=None)
-  collider model_lod00_g01: 67 parts [loose_parts; convex=49, lathe=18]
+  collider Arrrmless Dining Chair: 49 parts [loose_parts; convex=49]
 
-Done. 1 package(s), 4 mesh(es), 16 texture(s).
+Done. 1 package(s), 3 mesh(es), 37 texture(s).
  
 ======================================== 
 Finished. Exit code: 0 
