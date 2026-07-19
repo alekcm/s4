@@ -89,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="include CAS resources (clothing, hair)")
     ap.add_argument("--geom", action="store_true",
                     help="also extract GEOM meshes (creates extra 'default' objects)")
+    ap.add_argument("--per-object", action="store_true", default=True,
+                    help="(default on) extract each object in a multi-object package into its own folder")
+    ap.add_argument("--no-per-object", action="store_false", dest="per_object",
+                    help="extract everything into one folder (legacy mode)")
     ap.add_argument("-q", "--quiet", action="store_true")
     ap.add_argument("--json", action="store_true", help="print JSON report")
     ap.add_argument("--inspect", action="store_true",
@@ -129,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         all_lods=args.all_lods,
         no_cas=args.no_cas,
         extract_geom=args.geom,
+        per_object=args.per_object,
     )
 
     all_reports = []

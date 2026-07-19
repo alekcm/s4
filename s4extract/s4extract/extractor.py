@@ -40,6 +40,19 @@ class Options:
     no_cas: bool = True     # по умолчанию пропускаем CAS (одежда/волосы)
     extract_geom: bool = False  # по умолчанию не извлекаем GEOM (создаёт мусор "default")
     concavity_threshold: float = 0.20  # порог вогнутости для рекурсивного разбиения (0.0=все convex, 1.0=почти любой)
+    per_object: bool = True  # извлекать каждый объект из мульти-пакета в отдельную папку
+
+
+@dataclass
+class _ObjectContext:
+    """Internal: per-object extraction context for multi-object packages."""
+    pkg: DBPF
+    obj_name: str
+    stbl_name: str
+    id_str: str
+    out_root: str
+    modl_tgi_filter: set      # set of (type, group, instance) for MODL/MLOD
+    desc_str: str = ""
 
 
 import json
@@ -123,6 +136,44 @@ def get_or_create_catalog_entry(pkg: DBPF, package_path: str, base_name: str, db
             json.dump(db, f, indent=2, ensure_ascii=False)
             
     return entry["id"], entry["name"], entry["description"]
+
+
+def _get_or_create_object_id(db_path: str, package_path: str, obj_name: str,
+                              obj_stbl_name: str, source_instance: int) -> str:
+    """Get or create a catalog ID for a specific discovered object."""
+    db = []
+    if os.path.exists(db_path):
+        try:
+            with open(db_path, "r", encoding="utf-8") as f:
+                db = json.load(f)
+        except Exception:
+            db = []
+
+    # Composite key to uniquely identify this object within the package
+    obj_key = f"{os.path.basename(package_path)}::{obj_name}::{source_instance:016X}"
+
+    for item in db:
+        if item.get("_obj_key") == obj_key:
+            return item.get("id", "0001")
+
+    existing_ids = [int(item.get("id", 0)) for item in db if item.get("id")]
+    next_id = max(existing_ids) + 1 if existing_ids else 1
+    id_str = f"{next_id:04d}"
+
+    entry = {
+        "id": id_str,
+        "filename": os.path.basename(package_path),
+        "name": obj_name,
+        "description": obj_stbl_name or "",
+        "colors": [],
+        "_obj_key": obj_key,
+    }
+    db.append(entry)
+
+    with open(db_path, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2, ensure_ascii=False)
+
+    return id_str
 
 
 def _classify_texture_role(name: str) -> str:
@@ -218,21 +269,116 @@ def _compute_component_centroid(positions, faces, face_ids):
     return (cx, cy, cz)
 
 
-def extract_package(package_path: str, opt: Options) -> dict:
-    pkg = DBPF.from_file(package_path)
-    base = os.path.splitext(os.path.basename(package_path))[0]
-    
-    # Create the output directory first so the catalog can be saved inside it
+def _extract_per_object(pkg: DBPF, opt: Options, base: str,
+                        package_path: str, objects: list) -> dict:
+    """Extract each discovered object in a multi-object package into its own folder.
+
+    Called by ``extract_package()`` when ``per_object`` mode is enabled and more
+    than one object is found.  Each object gets its own output subfolder named
+    after its internal Sims 4 name (from OBJD/COBJ).
+    """
     os.makedirs(opt.out_dir, exist_ok=True)
     db_path = os.path.join(opt.out_dir, "catalog_database.json")
-    id_str, name_str, desc_str = get_or_create_catalog_entry(pkg, package_path, base, db_path)
-    
-    obj_name = name_str if name_str else base
-    safe_obj_name = "".join(c if c not in '<>:"/\\|?*' else '_' for c in obj_name).strip()
-    if not safe_obj_name:
-        safe_obj_name = base
 
-    out_root = os.path.join(opt.out_dir, f"[{id_str}] {safe_obj_name}")
+    all_reports = []
+    for obj_index, obj_info in enumerate(objects):
+        safe_name = "".join(c if c not in '<>:"/\\|?*' else '_' for c in obj_info.name).strip()
+        if not safe_name:
+            safe_name = f"object_{obj_index:04d}"
+
+        # Get or create a catalog ID for this specific object
+        id_str = _get_or_create_object_id(
+            db_path, package_path, safe_name,
+            obj_info.stbl_name, obj_info.source_instance)
+
+        out_root = os.path.join(opt.out_dir, f"[{id_str}] {safe_name}")
+
+        ctx = _ObjectContext(
+            pkg=pkg,
+            obj_name=safe_name,
+            stbl_name=obj_info.stbl_name,
+            id_str=id_str,
+            out_root=out_root,
+            modl_tgi_filter=set(obj_info.model_tgis),
+            desc_str=obj_info.stbl_name or "",
+        )
+
+        try:
+            obj_report = extract_package(package_path, opt, _obj_ctx=ctx)
+            all_reports.append(obj_report)
+        except Exception as e:
+            all_reports.append({
+                "package": package_path,
+                "out_dir": out_root,
+                "object_name": safe_name,
+                "total_resources": 0,
+                "meshes": [],
+                "textures": [],
+                "materials": [],
+                "colliders": [],
+                "prefabs": [],
+                "raw": [],
+                "errors": [f"object {safe_name}: {e}"],
+            })
+
+    # Combine per-object reports into one top-level report
+    combined = {
+        "package": package_path,
+        "out_dir": opt.out_dir,
+        "total_resources": len(pkg.entries),
+        "objects": len(objects),
+        "meshes": [],
+        "textures": [],
+        "materials": [],
+        "colliders": [],
+        "prefabs": [],
+        "raw": [],
+        "errors": [],
+    }
+    for r in all_reports:
+        for key in ("meshes", "textures", "materials", "colliders", "prefabs", "raw", "errors"):
+            combined[key].extend(r.get(key, []))
+
+    return combined
+
+
+def extract_package(package_path: str, opt: Options,
+                    _obj_ctx: _ObjectContext | None = None) -> dict:
+    # Open package (use provided DBPF in per-object mode to avoid re-reading)
+    if _obj_ctx is not None:
+        pkg = _obj_ctx.pkg
+    else:
+        pkg = DBPF.from_file(package_path)
+    base = os.path.splitext(os.path.basename(package_path))[0]
+
+    # --- Per-object discovery (only at the top level, not for recursive calls) ---
+    if _obj_ctx is None and opt.per_object:
+        from .objd import discover_objects
+        objects = discover_objects(pkg)
+        if len(objects) > 1:
+            return _extract_per_object(pkg, opt, base, package_path, objects)
+
+    # Create the output directory first so the catalog can be saved inside it
+    os.makedirs(opt.out_dir, exist_ok=True)
+
+    # --- Determine name, ID, and output folder ---
+    if _obj_ctx is not None:
+        # Per-object mode: use the context-provided values
+        safe_obj_name = _obj_ctx.obj_name
+        id_str = _obj_ctx.id_str
+        desc_str = _obj_ctx.desc_str
+        out_root = _obj_ctx.out_root
+        modl_tgi_filter = _obj_ctx.modl_tgi_filter
+    else:
+        # Single-folder mode: original STBL-based name logic
+        db_path = os.path.join(opt.out_dir, "catalog_database.json")
+        id_str, name_str, desc_str = get_or_create_catalog_entry(pkg, package_path, base, db_path)
+        obj_name = name_str if name_str else base
+        safe_obj_name = "".join(c if c not in '<>:"/\\|?*' else '_' for c in obj_name).strip()
+        if not safe_obj_name:
+            safe_obj_name = base
+        out_root = os.path.join(opt.out_dir, f"[{id_str}] {safe_obj_name}")
+        modl_tgi_filter = None
     os.makedirs(out_root, exist_ok=True)
 
     # PARTS/breakable exports are no longer part of the pipeline. Remove stale
@@ -290,6 +436,10 @@ def extract_package(package_path: str, opt: Options) -> dict:
     for type_id in (rt.MODL, rt.MLOD):
         priority = 0 if type_id == rt.MODL else 1
         for i, e in enumerate(pkg.find(type_id)):
+            # Per-object: skip MODL/MLOD entries that don't belong to this object
+            if modl_tgi_filter is not None:
+                if (e.type_id, e.group_id, e.instance) not in modl_tgi_filter:
+                    continue
             try:
                 data = pkg.read_resource(e)
                 rcol = RCOL(data)
@@ -370,7 +520,30 @@ def extract_package(package_path: str, opt: Options) -> dict:
     png_files = []
     texture_by_key = {}
     if opt.png:
+        # Collect referenced texture TGI keys from material variants
+        # (needed for per-object texture filtering to avoid extracting thousands
+        #  of unrelated textures from multi-object packages)
+        texture_tgi_filter = None
+        if modl_tgi_filter is not None:
+            texture_tgi_filter = set()
+            for rec in mesh_records:
+                if rec.get("rcol") is not None and rec.get("material_ref") is not None:
+                    try:
+                        variants = material_variants(rec["rcol"], rec["material_ref"])
+                        for mv in variants:
+                            if mv.diffuse_key:
+                                texture_tgi_filter.add(mv.diffuse_key)
+                            if mv.normal_key:
+                                texture_tgi_filter.add(mv.normal_key)
+                            if mv.specular_key:
+                                texture_tgi_filter.add(mv.specular_key)
+                    except Exception:
+                        pass
+
         tex_entries = [e for e in pkg.entries if e.type_id in rt.IMAGE_TYPES]
+        if texture_tgi_filter is not None:
+            tex_entries = [e for e in tex_entries
+                          if (e.type_id, e.group_id, e.instance) in texture_tgi_filter]
         for i, e in enumerate(tex_entries):
             try:
                 data = pkg.read_resource(e)
@@ -551,103 +724,110 @@ def extract_package(package_path: str, opt: Options) -> dict:
             try:
                 with open(db_path, "r", encoding="utf-8") as f:
                     db = json.load(f)
-                filename = os.path.basename(package_path)
+                # In per-object mode, match by id; otherwise by filename
+                lookup_key = id_str if modl_tgi_filter is not None else os.path.basename(package_path)
                 for item in db:
-                    if item.get("filename") == filename:
-                        swatches_found = []
-                        seen_mat_names = set()
+                    match = False
+                    if modl_tgi_filter is not None:
+                        match = item.get("id") == lookup_key
+                    else:
+                        match = item.get("filename") == lookup_key
+                    if not match:
+                        continue
+                    swatches_found = []
+                    seen_mat_names = set()
 
-                        COLOR_NAMES = {
-                            "Black": (30, 30, 30),
-                            "White": (240, 240, 240),
-                            "Grey": (128, 128, 128),
-                            "Dark Grey": (70, 70, 70),
-                            "Light Grey": (190, 190, 190),
-                            "Red": (200, 30, 30),
-                            "Dark Red": (130, 20, 20),
-                            "Orange": (220, 120, 30),
-                            "Yellow": (220, 220, 30),
-                            "Green": (30, 150, 30),
-                            "Dark Green": (20, 80, 20),
-                            "Blue": (30, 30, 200),
-                            "Dark Blue": (15, 30, 80),
-                            "Light Blue": (150, 200, 240),
-                            "Purple": (120, 30, 120),
-                            "Pink": (240, 150, 180),
-                            "Brown": (100, 60, 30),
-                            "Dark Brown": (60, 35, 15),
-                            "Beige": (220, 200, 170),
-                            "Cream": (255, 250, 220),
-                            "Teal": (0, 128, 128),
-                            "Burgundy": (128, 0, 32),
-                            "Olive": (100, 110, 30),
-                            "Coral": (255, 127, 80),
-                            "Navy": (20, 20, 80),
-                            "Turquoise": (64, 200, 200),
-                            "Gold": (200, 170, 50),
-                            "Silver": (180, 185, 190),
-                            "Tan": (210, 180, 140),
-                        }
+                    COLOR_NAMES = {
+                        "Black": (30, 30, 30),
+                        "White": (240, 240, 240),
+                        "Grey": (128, 128, 128),
+                        "Dark Grey": (70, 70, 70),
+                        "Light Grey": (190, 190, 190),
+                        "Red": (200, 30, 30),
+                        "Dark Red": (130, 20, 20),
+                        "Orange": (220, 120, 30),
+                        "Yellow": (220, 220, 30),
+                        "Green": (30, 150, 30),
+                        "Dark Green": (20, 80, 20),
+                        "Blue": (30, 30, 200),
+                        "Dark Blue": (15, 30, 80),
+                        "Light Blue": (150, 200, 240),
+                        "Purple": (120, 30, 120),
+                        "Pink": (240, 150, 180),
+                        "Brown": (100, 60, 30),
+                        "Dark Brown": (60, 35, 15),
+                        "Beige": (220, 200, 170),
+                        "Cream": (255, 250, 220),
+                        "Teal": (0, 128, 128),
+                        "Burgundy": (128, 0, 32),
+                        "Olive": (100, 110, 30),
+                        "Coral": (255, 127, 80),
+                        "Navy": (20, 20, 80),
+                        "Turquoise": (64, 200, 200),
+                        "Gold": (200, 170, 50),
+                        "Silver": (180, 185, 190),
+                        "Tan": (210, 180, 140),
+                    }
 
-                        def get_image_dominant_color_hex(png_path):
-                            try:
-                                from PIL import Image as _PILImage
-                                im = _PILImage.open(png_path).convert("RGB")
-                                im = im.resize((64, 64))
+                    def get_image_dominant_color_hex(png_path):
+                        try:
+                            from PIL import Image as _PILImage
+                            im = _PILImage.open(png_path).convert("RGB")
+                            im = im.resize((64, 64))
 
-                                quantized = im.quantize(colors=16, method=2)
-                                palette = quantized.getpalette()
-                                color_counts = Counter(quantized.getdata())
+                            quantized = im.quantize(colors=16, method=2)
+                            palette = quantized.getpalette()
+                            color_counts = Counter(quantized.getdata())
 
-                                scored = []
-                                for idx, count in color_counts.items():
-                                    r = palette[idx * 3]
-                                    g = palette[idx * 3 + 1]
-                                    b = palette[idx * 3 + 2]
-                                    if r > 220 and g > 220 and b > 220:
-                                        continue
-                                    if r < 30 and g < 30 and b < 30:
-                                        continue
-                                    _h, s, _v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
-                                    score = count * (0.3 + 0.7 * s)
-                                    scored.append((score, r, g, b))
+                            scored = []
+                            for idx, count in color_counts.items():
+                                r = palette[idx * 3]
+                                g = palette[idx * 3 + 1]
+                                b = palette[idx * 3 + 2]
+                                if r > 220 and g > 220 and b > 220:
+                                    continue
+                                if r < 30 and g < 30 and b < 30:
+                                    continue
+                                _h, s, _v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+                                score = count * (0.3 + 0.7 * s)
+                                scored.append((score, r, g, b))
 
-                                if scored:
-                                    scored.sort(reverse=True)
-                                    _, r, g, b = scored[0]
-                                    return f"#{r:02x}{g:02x}{b:02x}"
-
-                                most_idx = color_counts.most_common(1)[0][0]
-                                r = palette[most_idx * 3]
-                                g = palette[most_idx * 3 + 1]
-                                b = palette[most_idx * 3 + 2]
+                            if scored:
+                                scored.sort(reverse=True)
+                                _, r, g, b = scored[0]
                                 return f"#{r:02x}{g:02x}{b:02x}"
-                            except Exception:
-                                return "#FFFFFF"
 
-                        def get_closest_color_name(hex_str):
-                            h = hex_str.lstrip('#')
-                            r, g, b = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-                            best_name = "Unknown"
-                            best_dist = float('inf')
-                            for name, rgb in COLOR_NAMES.items():
-                                dist = (r - rgb[0])**2 + (g - rgb[1])**2 + (b - rgb[2])**2
-                                if dist < best_dist:
-                                    best_dist = dist
-                                    best_name = name
-                            return best_name
+                            most_idx = color_counts.most_common(1)[0][0]
+                            r = palette[most_idx * 3]
+                            g = palette[most_idx * 3 + 1]
+                            b = palette[most_idx * 3 + 2]
+                            return f"#{r:02x}{g:02x}{b:02x}"
+                        except Exception:
+                            return "#FFFFFF"
 
-                        for mat_name, albedo_file, _, _ in material_texture_pairs:
-                            if mat_name in seen_mat_names:
-                                continue
-                            seen_mat_names.add(mat_name)
+                    def get_closest_color_name(hex_str):
+                        h = hex_str.lstrip('#')
+                        r, g, b = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+                        best_name = "Unknown"
+                        best_dist = float('inf')
+                        for name, rgb in COLOR_NAMES.items():
+                            dist = (r - rgb[0])**2 + (g - rgb[1])**2 + (b - rgb[2])**2
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_name = name
+                        return best_name
 
-                            parts = mat_name.split("_")
-                            swatch_part = None
-                            for p in parts:
-                                if p.startswith("swatch"):
-                                    swatch_part = p
-                                    break
+                    for mat_name, albedo_file, _, _ in material_texture_pairs:
+                        if mat_name in seen_mat_names:
+                            continue
+                        seen_mat_names.add(mat_name)
+
+                        parts = mat_name.split("_")
+                        swatch_part = None
+                        for p in parts:
+                            if p.startswith("swatch"):
+                                swatch_part = p
+                                break
                             if not swatch_part:
                                 swatch_part = mat_name
 

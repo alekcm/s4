@@ -5,6 +5,10 @@ GEOM = 0x015A1849          # Body geometry (the actual editable mesh)
 MODL = 0x01661233          # Model (object)
 MLOD = 0x01D10F34          # Model LOD container
 
+# Catalog / object definition
+OBJD = 0x6C3C6A89          # Object Definition (furniture, objects)
+COBJ = 0x319E4F1D          # Catalog Object
+
 # Textures
 DDS_RLE2 = 0x3453CF95      # RLES (DST5 packed) used by S4
 DDS_RLE = 0xBA856C78       # RLE2/RLE0 packed DDS
@@ -30,6 +34,7 @@ TYPE_NAMES = {
     0x01D0E75D: "MATD",
     0x220557DA: "STBL",
     0x319E4F1D: "COBJ",
+    0x6C3C6A89: "OBJD",
     0xC0DB5AE7: "CATALOG",
     0x03B4C61D: "LITE",
     0x4F726BBE: "FTPT",
