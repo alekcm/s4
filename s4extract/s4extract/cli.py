@@ -93,6 +93,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="(default on) extract each object in a multi-object package into its own folder")
     ap.add_argument("--no-per-object", action="store_false", dest="per_object",
                     help="extract everything into one folder (legacy mode)")
+    ap.add_argument("--no-linked-fullbuilds", action="store_false", dest="linked_fullbuilds",
+                    default=True,
+                    help="do not automatically link numbered ClientFullBuild/DeltaBuild siblings")
+    ap.add_argument("--no-game-resource-search", action="store_false", dest="game_resource_fallback",
+                    default=True,
+                    help="do not search installed Build/DeltaBuild packages for missing linked TGIs")
     ap.add_argument("-q", "--quiet", action="store_true")
     ap.add_argument("--json", action="store_true", help="print JSON report")
     ap.add_argument("--inspect", action="store_true",
@@ -134,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
         no_cas=args.no_cas,
         extract_geom=args.geom,
         per_object=args.per_object,
+        linked_fullbuilds=args.linked_fullbuilds,
+        game_resource_fallback=args.game_resource_fallback,
     )
 
     all_reports = []
@@ -150,6 +158,19 @@ def main(argv: list[str] | None = None) -> int:
             continue
         print(f"  -> {rep['out_dir']}")
         print(f"  resources: {rep['total_resources']}")
+        linked = rep.get("linked_resources")
+        if linked:
+            family = ", ".join(linked.get("family_packages", []))
+            print(f"  linked FullBuilds: {family}")
+            print(f"  linked TGI index: {linked.get('indexed_tgis', 0)} resources "
+                  f"in {linked.get('indexed_packages', 0)} packages; "
+                  f"duplicates={linked.get('duplicate_tgis', 0)}")
+            reads = linked.get("resources_read") or {}
+            if reads:
+                print("  linked texture reads: " + ", ".join(
+                    f"{name}={count}" for name, count in sorted(reads.items())))
+            for warning in linked.get("warnings") or []:
+                print(f"  linked warning: {warning}")
         for m in rep["meshes"]:
             print(f"  mesh  {m['name']}: {m['verts']} verts, {m['faces']} faces -> {', '.join(m['files'])}")
         for t in rep["textures"]:

@@ -130,17 +130,120 @@ class DBPF:
 
     def read_resource(self, entry: IndexEntry) -> bytes:
         raw = self.data[entry.offset:entry.offset + entry.file_size]
-        if not entry.compressed:
-            # Even if the flag says uncompressed, some files store zlib anyway.
-            if _looks_zlib(raw):
-                dec = _try_zlib(raw, entry.mem_size)
-                if dec is not None:
-                    return dec
-            return raw
-        return decompress_chunk(raw, entry.mem_size)
+        return _decode_resource_bytes(raw, entry)
 
     def find(self, type_id: int) -> list[IndexEntry]:
         return [e for e in self.entries if e.type_id == type_id]
+
+
+class DBPFIndex:
+    """The index of a DBPF file, read without loading its resource data.
+
+    Large official FullBuild files can be several hundred megabytes each.  A
+    linked-resource lookup only needs their 96-byte header and index table, not
+    every texture payload, so this lightweight reader is used by the shared
+    resource resolver.
+    """
+
+    def __init__(self, path: str, entries: list[IndexEntry]):
+        self.path = path
+        self.entries = entries
+
+    @classmethod
+    def from_file(cls, path: str) -> "DBPFIndex":
+        with open(path, "rb") as f:
+            header = f.read(96)
+            if len(header) < 96 or header[:4] != DBPF.MAGIC:
+                raise ValueError("Not a DBPF package (bad magic)")
+            major = struct.unpack_from("<I", header, 4)[0]
+            if major != 2:
+                raise ValueError(f"Unsupported DBPF major version {major} (only 2.x supported)")
+            count = struct.unpack_from("<I", header, 36)[0]
+            index_size = struct.unpack_from("<I", header, 44)[0]
+            index_offset = struct.unpack_from("<I", header, 64)[0]
+            if count == 0 or index_offset == 0:
+                return cls(path, [])
+            f.seek(index_offset)
+            index_data = f.read(index_size)
+        return cls(path, _parse_index_data(index_data, count))
+
+    def find(self, type_id: int) -> list[IndexEntry]:
+        return [e for e in self.entries if e.type_id == type_id]
+
+
+class DBPFStream:
+    """Seek-based DBPF resource reader for indexed external package files.
+
+    It retains only a file handle and the small index table.  This avoids
+    retaining multiple 500 MB FullBuild files in RAM while exporting textures
+    referenced by objects from another package.
+    """
+
+    def __init__(self, path: str, index: DBPFIndex | None = None):
+        self.path = path
+        self.entries = (index.entries if index is not None else DBPFIndex.from_file(path).entries)
+        self._file = None
+
+    def read_resource(self, entry: IndexEntry) -> bytes:
+        if self._file is None:
+            self._file = open(self.path, "rb")
+        self._file.seek(entry.offset)
+        raw = self._file.read(entry.file_size)
+        if len(raw) != entry.file_size:
+            raise ValueError(f"Short read of DBPF resource {entry.tgi} in {self.path}")
+        return _decode_resource_bytes(raw, entry)
+
+    def close(self) -> None:
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
+
+def _parse_index_data(data: bytes, count: int) -> list[IndexEntry]:
+    """Parse a DBPF index table whose first byte is the index type flag."""
+    if len(data) < 4:
+        raise ValueError("Truncated DBPF index")
+    pos = 0
+    index_type = struct.unpack_from("<I", data, pos)[0]
+    pos += 4
+
+    const = {}
+    for bit in range(8):
+        if index_type & (1 << bit):
+            if pos + 4 > len(data):
+                raise ValueError("Truncated DBPF index constants")
+            const[bit] = struct.unpack_from("<I", data, pos)[0]
+            pos += 4
+
+    entries: list[IndexEntry] = []
+    for _ in range(count):
+        fields = []
+        for bit in range(8):
+            if bit in const:
+                fields.append(const[bit])
+            else:
+                if pos + 4 > len(data):
+                    raise ValueError("Truncated DBPF index entry")
+                fields.append(struct.unpack_from("<I", data, pos)[0])
+                pos += 4
+        type_id, group_id, inst_hi, inst_lo, chunk_off, file_size_raw, mem_size, comp_raw = fields
+        entries.append(IndexEntry(
+            type_id=type_id,
+            group_id=group_id,
+            instance_hi=inst_hi,
+            instance_lo=inst_lo,
+            offset=chunk_off,
+            file_size=file_size_raw & 0x7FFFFFFF,
+            mem_size=mem_size,
+            compressed=(comp_raw & 0xFFFF) in (0xFFFF, 0x5A42),
+        ))
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +287,18 @@ def _try_zlib(data: bytes, expected: int | None) -> bytes | None:
         return _zlib.decompress(data, -15)
     except Exception:
         return None
+
+
+def _decode_resource_bytes(raw: bytes, entry: IndexEntry) -> bytes:
+    """Decode raw on-disk bytes for one DBPF index entry."""
+    if not entry.compressed:
+        # Even if the index says uncompressed, some TS4 files store zlib data.
+        if _looks_zlib(raw):
+            dec = _try_zlib(raw, entry.mem_size)
+            if dec is not None:
+                return dec
+        return raw
+    return decompress_chunk(raw, entry.mem_size)
 
 
 def decompress_chunk(raw: bytes, expected_size: int | None = None) -> bytes:

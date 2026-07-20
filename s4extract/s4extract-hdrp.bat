@@ -9,6 +9,8 @@ REM    --pipeline hdrp
 REM    --all-lods             (extract all LOD levels)
 REM    --no-cas               (skip clothing/hair/body meshes)
 REM    --per-object           (each object in multi-object .package gets its own folder)
+REM    FullBuild link mode     (automatic: ClientFullBuild0 also searches sibling
+REM                             ClientFullBuild1/2... and installed game Build data)
 REM ===================================================================
 cd /d "%~dp0"
 

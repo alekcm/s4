@@ -16,6 +16,7 @@ from . import resource_types as rt
 from . import textures
 from . import unity
 from . import colliders as col
+from .linked_resources import LinkedResourceLibrary
 
 
 @dataclass
@@ -41,6 +42,8 @@ class Options:
     extract_geom: bool = False  # по умолчанию не извлекаем GEOM (создаёт мусор "default")
     concavity_threshold: float = 0.20  # порог вогнутости для рекурсивного разбиения (0.0=все convex, 1.0=почти любой)
     per_object: bool = True  # извлекать каждый объект из мульти-пакета в отдельную папку
+    linked_fullbuilds: bool = True  # объединять пронумерованные ClientFullBuildN автоматически
+    game_resource_fallback: bool = True  # искать отсутствующие TGI в Build/DeltaBuild установленной игры
 
 
 @dataclass
@@ -272,7 +275,8 @@ def _compute_component_centroid(positions, faces, face_ids):
 
 
 def _extract_per_object(pkg: DBPF, opt: Options, base: str,
-                        package_path: str, objects: list) -> dict:
+                        package_path: str, objects: list,
+                        resource_library: LinkedResourceLibrary | None = None) -> dict:
     """Extract each discovered object in a multi-object package into its own folder.
 
     Called by ``extract_package()`` when ``per_object`` mode is enabled and more
@@ -306,7 +310,9 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
         )
 
         try:
-            obj_report = extract_package(package_path, opt, _obj_ctx=ctx)
+            obj_report = extract_package(
+                package_path, opt, _obj_ctx=ctx,
+                _resource_library=resource_library)
             all_reports.append(obj_report)
         except Exception as e:
             all_reports.append({
@@ -345,7 +351,41 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
 
 
 def extract_package(package_path: str, opt: Options,
-                    _obj_ctx: _ObjectContext | None = None) -> dict:
+                    _obj_ctx: _ObjectContext | None = None,
+                    _resource_library: LinkedResourceLibrary | None = None) -> dict:
+    # A numbered official package (ClientFullBuild0/1/2...) is not a
+    # standalone resource container. Before opening a potentially huge source
+    # file, build a shared TGI resolver and export every sibling that actually
+    # contains models. The resolver is passed down to every per-object call.
+    if _obj_ctx is None and _resource_library is None and opt.linked_fullbuilds:
+        linked = LinkedResourceLibrary.for_package(package_path)
+        if linked is not None:
+            try:
+                source_paths = linked.model_package_paths()
+                linked_reports = [
+                    extract_package(source_path, opt, _resource_library=linked)
+                    for source_path in source_paths
+                ]
+                if len(linked_reports) == 1:
+                    combined = linked_reports[0]
+                else:
+                    combined = {
+                        "package": package_path,
+                        "out_dir": opt.out_dir,
+                        "total_resources": sum(r.get("total_resources", 0) for r in linked_reports),
+                        "objects": sum(r.get("objects", 0) for r in linked_reports),
+                        "meshes": [], "textures": [], "materials": [],
+                        "colliders": [], "prefabs": [], "raw": [], "errors": [],
+                    }
+                    for child_report in linked_reports:
+                        for key in ("meshes", "textures", "materials", "colliders", "prefabs", "raw", "errors"):
+                            combined[key].extend(child_report.get(key, []))
+                combined["linked_resources"] = linked.describe()
+                combined["linked_resources"]["warnings"] = linked.warnings
+                return combined
+            finally:
+                linked.close()
+
     # Open package (use provided DBPF in per-object mode to avoid re-reading)
     if _obj_ctx is not None:
         pkg = _obj_ctx.pkg
@@ -358,7 +398,9 @@ def extract_package(package_path: str, opt: Options,
         from .objd import discover_objects
         objects = discover_objects(pkg)
         if len(objects) > 1:
-            return _extract_per_object(pkg, opt, base, package_path, objects)
+            return _extract_per_object(
+                pkg, opt, base, package_path, objects,
+                resource_library=_resource_library)
 
     # Create the output directory first so the catalog can be saved inside it
     os.makedirs(opt.out_dir, exist_ok=True)
@@ -538,7 +580,10 @@ def extract_package(package_path: str, opt: Options,
         # (needed for per-object texture filtering to avoid extracting thousands
         #  of unrelated textures from multi-object packages)
         texture_tgi_filter = None
-        if modl_tgi_filter is not None:
+        # Linked FullBuild exports need the same targeted texture list even
+        # when a package has no readable CATALOG/OBJD entry. Otherwise a model
+        # in FullBuild0 could never request its texture from FullBuild2.
+        if modl_tgi_filter is not None or _resource_library is not None:
             texture_tgi_filter = set()
             for rec in mesh_records:
                 if rec.get("rcol") is not None and rec.get("material_ref") is not None:
@@ -551,23 +596,76 @@ def extract_package(package_path: str, opt: Options,
                                 texture_tgi_filter.add(mv.normal_key)
                             if mv.specular_key:
                                 texture_tgi_filter.add(mv.specular_key)
+                            if mv.emission_key:
+                                texture_tgi_filter.add(mv.emission_key)
                     except Exception:
                         pass
 
-        tex_entries = [e for e in pkg.entries if e.type_id in rt.IMAGE_TYPES]
-        if texture_tgi_filter is not None:
-            tex_entries = [e for e in tex_entries
-                          if (e.type_id, e.group_id, e.instance) in texture_tgi_filter]
-        for i, e in enumerate(tex_entries):
+        # A normal CC package keeps model and texture resources together. An
+        # official ClientFullBuild family often does not: MODL/MLOD can be in
+        # FullBuild0 and the exact TGI referenced by MATD can be in FullBuild2
+        # (or in base-game/DeltaBuild data). Resolve by TGI, never by texture
+        # filename or a DLC-specific table.
+        texture_sources = []  # (IndexEntry, ResourceLocation|None)
+        if _resource_library is not None and texture_tgi_filter is not None:
+            if opt.game_resource_fallback:
+                # Header/index-only scan, once for the shared library. This
+                # lets a DLC object reuse base-game textures without manually
+                # declaring a relationship between any packs.
+                _resource_library.prepare_game_fallback()
+
+            missing_count = 0
+            non_image_count = 0
+            for key in sorted(texture_tgi_filter):
+                location = _resource_library.resolve(
+                    key, preferred_path=package_path,
+                    search_game=False)
+                if location is None:
+                    missing_count += 1
+                    if missing_count <= 20:
+                        report["errors"].append(
+                            f"TEX unresolved across linked packages: "
+                            f"{key[0]:08X}_{key[1]:08X}_{key[2]:016X}")
+                    continue
+                if location.entry.type_id not in rt.IMAGE_TYPES:
+                    non_image_count += 1
+                    if non_image_count <= 10:
+                        report["errors"].append(
+                            f"TEX TGI resolved to unsupported resource type "
+                            f"{location.entry.type_id:08X}: {location.entry.tgi}")
+                    continue
+                texture_sources.append((location.entry, location))
+            if missing_count > 20:
+                report["errors"].append(
+                    f"TEX unresolved across linked packages: {missing_count} total "
+                    f"({missing_count - 20} additional references omitted)")
+            if non_image_count > 10:
+                report["errors"].append(
+                    f"TEX linked resources with unsupported type: {non_image_count} total")
+        else:
+            tex_entries = [e for e in pkg.entries if e.type_id in rt.IMAGE_TYPES]
+            if texture_tgi_filter is not None:
+                tex_entries = [e for e in tex_entries
+                              if (e.type_id, e.group_id, e.instance) in texture_tgi_filter]
+            texture_sources = [(entry, None) for entry in tex_entries]
+
+        for i, (e, location) in enumerate(texture_sources):
             try:
-                data = pkg.read_resource(e)
+                if location is None:
+                    data = pkg.read_resource(e)
+                else:
+                    data = _resource_library.read_resource(
+                        location, loaded_package=pkg, loaded_path=package_path)
                 name = f"{safe_obj_name}_tex{i:02d}"
                 p = os.path.join(out_root, name + ".png")
                 status = textures.save_as_png(data, p)
                 png_files.append(p)
                 texture_by_key[(e.type_id, e.group_id, e.instance)] = p
-                report["textures"].append({"name": name, "status": status,
-                                           "file": os.path.basename(p)})
+                tex_report = {"name": name, "status": status,
+                              "file": os.path.basename(p)}
+                if location is not None:
+                    tex_report["source_package"] = location.package_name
+                report["textures"].append(tex_report)
             except Exception as ex:
                 report["errors"].append(f"TEX {e.tgi}: {ex}")
 
