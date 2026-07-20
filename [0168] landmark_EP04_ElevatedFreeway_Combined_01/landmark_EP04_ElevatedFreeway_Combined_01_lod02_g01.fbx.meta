@@ -1,0 +1,29 @@
+fileFormatVersion: 2
+guid: 7c86f8731fc3fdfa1c9c55eeb7879525
+ModelImporter:
+  serializedVersion: 22200
+  internalIDToNameTable: []
+  externalObjects:
+    - first:
+        type: UnityEngine:Material
+        assembly: UnityEngine.CoreModule
+        name: landmark_EP04_ElevatedFreeway_Combined_01_lod02_g01
+      second: {fileID: 2100000, guid: a527e63a0622aed5389d1d58fb52a66d, type: 2}
+  materials:
+    materialImportMode: 2
+    materialName: 0
+    materialSearch: 1
+    materialLocation: 1
+  meshes:
+    useFileScale: 0
+    globalScale: 1
+    addColliders: 0
+    importBlendShapes: 0
+    keepQuads: 0
+    optimizeMeshForGPU: 1
+    weldVertices: 1
+  importAnimation: 0
+  animationType: 0
+  userData:
+  assetBundleName:
+  assetBundleVariant:
