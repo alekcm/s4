@@ -71,6 +71,7 @@ import time
 
 
 _RESUME_MANIFEST = ".s4extract_complete.json"
+_IN_PROGRESS_MANIFEST = ".s4extract_in_progress.json"
 _RESUME_SCHEMA = 1
 
 
@@ -134,6 +135,28 @@ def _manifest_path(out_root: str) -> str:
     return os.path.join(out_root, _RESUME_MANIFEST)
 
 
+def _in_progress_path(out_root: str) -> str:
+    return os.path.join(out_root, _IN_PROGRESS_MANIFEST)
+
+
+def _write_in_progress_marker(out_root: str, identity: str) -> None:
+    """Mark an object before writing files so an interrupted new run is retried."""
+    os.makedirs(out_root, exist_ok=True)
+    path = _in_progress_path(out_root)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"schema": _RESUME_SCHEMA, "object_identity": identity,
+                   "started_at": int(time.time())}, f, ensure_ascii=False)
+
+
+def _clear_in_progress_marker(out_root: str) -> None:
+    try:
+        os.remove(_in_progress_path(out_root))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
 def _required_export_files(report: dict, out_root: str) -> list[str]:
     """Return generated files whose absence means an object must be rebuilt."""
     files = []
@@ -179,22 +202,77 @@ def _completed_object_manifest(out_root: str, identity: str, package_fingerprint
     return all(os.path.isfile(os.path.join(out_root, filename)) for filename in required)
 
 
-def _write_completed_object_manifest(out_root: str, identity: str,
-                                     package_fingerprint: dict, signature: dict,
-                                     report: dict) -> None:
+def _write_object_manifest(out_root: str, identity: str, package_fingerprint: dict,
+                           signature: dict, required_files: list[str],
+                           legacy_adopted: bool = False) -> None:
     manifest = {
         "schema": _RESUME_SCHEMA,
         "object_identity": identity,
         "package": package_fingerprint,
         "options": signature,
-        "required_files": _required_export_files(report, out_root),
+        "required_files": sorted(set(required_files)),
         "completed_at": int(time.time()),
+        "legacy_adopted": legacy_adopted,
     }
     path = _manifest_path(out_root)
     temp_path = path + ".tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     os.replace(temp_path, path)
+
+
+def _write_completed_object_manifest(out_root: str, identity: str,
+                                     package_fingerprint: dict, signature: dict,
+                                     report: dict) -> None:
+    _write_object_manifest(
+        out_root, identity, package_fingerprint, signature,
+        _required_export_files(report, out_root))
+
+
+def _legacy_visual_mesh_files(out_root: str) -> list[str]:
+    """Find pre-manifest visual meshes without relying on the folder's name.
+
+    Old versions did not create completion manifests.  A real FBX is always a
+    visual mesh in this exporter; for OBJ-only exports exclude known collider,
+    breakable and part helper names.  The caller already reached *out_root*
+    via catalog ID + source instance, so this is not a loose name search.
+    """
+    try:
+        names = os.listdir(out_root)
+    except OSError:
+        return []
+    visual = []
+    for filename in names:
+        full_path = os.path.join(out_root, filename)
+        if not os.path.isfile(full_path):
+            continue
+        lower = filename.lower()
+        if lower.endswith(".fbx"):
+            visual.append(filename)
+            continue
+        if not lower.endswith(".obj"):
+            continue
+        if any(marker in lower for marker in ("_collider", "_part", "_broken")):
+            continue
+        visual.append(filename)
+    return sorted(visual)
+
+
+def _adopt_legacy_object_export(out_root: str, identity: str,
+                                 package_fingerprint: dict, signature: dict) -> bool:
+    """Create a resume marker for a complete-looking export from older builds."""
+    # A modern run writes this marker before the first FBX/OBJ. Its presence
+    # means the folder may be partial after interruption and must be rebuilt,
+    # not adopted merely because a mesh file already exists.
+    if os.path.exists(_in_progress_path(out_root)):
+        return False
+    visual_files = _legacy_visual_mesh_files(out_root)
+    if not visual_files:
+        return False
+    _write_object_manifest(
+        out_root, identity, package_fingerprint, signature, visual_files,
+        legacy_adopted=True)
+    return True
 
 
 def get_or_create_catalog_entry(pkg: DBPF, package_path: str, base_name: str, db_path: str = "catalog_database.json") -> tuple[str, str, str]:
@@ -444,12 +522,22 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
         identity = _object_identity(
             package_path, obj_info.source_instance, obj_info.model_tgis)
 
+        resume_reason = ""
         if opt.resume and _completed_object_manifest(
                 out_root, identity, package_fingerprint, signature):
+            resume_reason = "already complete"
+        elif opt.resume and _adopt_legacy_object_export(
+                out_root, identity, package_fingerprint, signature):
+            # Compatibility migration: prior versions had meshes but no marker.
+            # Adopt them once, using the catalog-derived output path rather
+            # than a fragile folder-name search.
+            resume_reason = "existing legacy mesh adopted"
+
+        if resume_reason:
             _notify_progress(
                 opt, "object_skipped", package=os.path.basename(package_path),
                 current=current, total=total_objects, name=safe_name,
-                reason="already complete")
+                reason=resume_reason)
             all_reports.append({
                 "package": package_path,
                 "out_dir": out_root,
@@ -458,6 +546,7 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
                 "meshes": [], "textures": [], "materials": [],
                 "colliders": [], "prefabs": [], "raw": [], "errors": [],
                 "skipped": True,
+                "skip_reason": resume_reason,
             })
             continue
 
@@ -477,6 +566,7 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
             current=current, total=total_objects, name=safe_name)
 
         try:
+            _write_in_progress_marker(out_root, identity)
             obj_report = extract_package(
                 package_path, opt, _obj_ctx=ctx,
                 _resource_library=resource_library)
@@ -485,6 +575,7 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
             # one object is safely rebuilt on the next launch.
             _write_completed_object_manifest(
                 out_root, identity, package_fingerprint, signature, obj_report)
+            _clear_in_progress_marker(out_root)
             obj_report["resume_manifest"] = _RESUME_MANIFEST
             all_reports.append(obj_report)
             _notify_progress(
