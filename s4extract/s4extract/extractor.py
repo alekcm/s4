@@ -957,3 +957,64 @@ def extract_package(package_path: str, opt: Options,
                 })
 
     return report
+
+# ---------------------------------------------------------------------------
+# Diagnostic helpers (for diagnose.py / diagnose_script.py)
+# ---------------------------------------------------------------------------
+
+from .objd import discover_objects as _discover_objects_impl, _extract_inline_name, _extract_model_tgis_objd
+
+def _build_stbl_map(pkg) -> dict:
+    stbl_map = {}
+    for e in pkg.find(0x220557DA):
+        try:
+            data = pkg.read_resource(e)
+        except Exception:
+            continue
+        if len(data) < 21 or data[:4] != b"STBL":
+            continue
+        try:
+            import struct
+            string_count = struct.unpack_from("<I", data, 16)[0]
+            pos = 21
+            for _ in range(string_count):
+                if pos + 12 > len(data):
+                    break
+                key = struct.unpack_from("<I", data, pos)[0]
+                pos += 4
+                pos += 4
+                length = struct.unpack_from("<I", data, pos)[0]
+                pos += 4
+                if pos + length > len(data):
+                    break
+                string_bytes = data[pos:pos + length]
+                pos += length
+                try:
+                    val = string_bytes.decode("utf-8")
+                except Exception:
+                    val = string_bytes.decode("latin1", errors="replace")
+                stbl_map[key] = val
+        except Exception:
+            continue
+    return stbl_map
+
+def _parse_cobj(data: bytes) -> dict:
+    import struct
+    name_hash = 0
+    if len(data) >= 4:
+        name_hash = struct.unpack_from("<I", data, 0)[0]
+    return {"name_hash": name_hash}
+
+def _parse_objd(data: bytes) -> dict:
+    model_keys = _extract_model_tgis_objd(data)
+    name = _extract_inline_name(data)
+    return {"model_keys": model_keys, "name": name or ""}
+
+def _discover_objects(pkg, base: str = ""):
+    objects = _discover_objects_impl(pkg)
+    class _Wrapped:
+        def __init__(self, obj):
+            self.display_name = obj.stbl_name or obj.name or base
+            self.internal_name = obj.name or base
+            self.modl_tgis = obj.model_tgis
+    return [_Wrapped(o) for o in objects]
