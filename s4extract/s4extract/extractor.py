@@ -51,7 +51,9 @@ class _ObjectContext:
     stbl_name: str
     id_str: str
     out_root: str
-    modl_tgi_filter: set      # set of (type, group, instance) for MODL/MLOD
+    # Catalog TGI references for this object.  MODL and its MLOD variants
+    # share an instance ID but legitimately differ in type/group.
+    modl_tgi_filter: set
     desc_str: str = ""
 
 
@@ -432,14 +434,26 @@ def extract_package(package_path: str, opt: Options,
             except Exception as ex:
                 report["errors"].append(f"GEOM {e.tgi}: {ex}")
 
+    # In a multi-object package the catalog commonly points only to MODL
+    # (type=01661233, group=0).  Its lower-detail resources are MLOD
+    # (type=01D10F34) with the *same instance* but other group IDs, such as
+    # 00010000/00010001/00010002.  Comparing a complete TGI here used to
+    # reject every MLOD during per-object extraction, leaving only LOD0.
+    # The instance is the object-model family key; type/group select a member
+    # of that family, so filter model resources by instance only.
+    object_model_instances = (
+        {instance for _type, _group, instance in modl_tgi_filter}
+        if modl_tgi_filter is not None else None
+    )
+
     lod_candidates = []
     for type_id in (rt.MODL, rt.MLOD):
         priority = 0 if type_id == rt.MODL else 1
         for i, e in enumerate(pkg.find(type_id)):
-            # Per-object: skip MODL/MLOD entries that don't belong to this object
-            if modl_tgi_filter is not None:
-                if (e.type_id, e.group_id, e.instance) not in modl_tgi_filter:
-                    continue
+            # Per-object: include MODL and every MLOD variant belonging to
+            # one of this object's catalog model instances.
+            if object_model_instances is not None and e.instance not in object_model_instances:
+                continue
             try:
                 data = pkg.read_resource(e)
                 rcol = RCOL(data)
