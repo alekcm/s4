@@ -6,6 +6,7 @@ import math
 import colorsys
 from collections import deque, Counter
 from dataclasses import dataclass
+from typing import Callable
 
 from .dbpf import DBPF
 from .geom import parse_geom, GeomMesh
@@ -44,6 +45,8 @@ class Options:
     per_object: bool = True  # извлекать каждый объект из мульти-пакета в отдельную папку
     linked_fullbuilds: bool = True  # объединять пронумерованные ClientFullBuildN автоматически
     game_resource_fallback: bool = True  # искать отсутствующие TGI в Build/DeltaBuild установленной игры
+    resume: bool = True  # пропускать ранее полностью экспортированные объекты
+    progress_callback: Callable[..., None] | None = None  # CLI-индикатор процесса
 
 
 @dataclass
@@ -58,10 +61,141 @@ class _ObjectContext:
     # share an instance ID but legitimately differ in type/group.
     modl_tgi_filter: set
     desc_str: str = ""
+    progress_index: int = 0
+    progress_total: int = 0
 
 
 import json
 import struct
+import time
+
+
+_RESUME_MANIFEST = ".s4extract_complete.json"
+_RESUME_SCHEMA = 1
+
+
+def _notify_progress(opt: Options, event: str, **payload) -> None:
+    """Emit a best-effort progress event without affecting extraction."""
+    callback = opt.progress_callback
+    if callback is None:
+        return
+    try:
+        callback(event, **payload)
+    except Exception:
+        # A broken console/UI callback must never stop a potentially long export.
+        pass
+
+
+def _catalog_object_key(package_path: str, safe_name: str, source_instance: int) -> str:
+    """Legacy catalog-db key; preserved so existing numerical IDs stay stable."""
+    return f"{os.path.basename(package_path)}::{safe_name}::{source_instance:016X}"
+
+
+def _object_identity(package_path: str, source_instance: int, model_tgis=()) -> str:
+    """Stable resume key independent of visible folder/object names.
+
+    The CATALOG/OBJD resource instance is the durable object identifier. Model
+    TGIs are included as a secondary guard for unusual packages; neither the
+    output folder name nor its '[0001]' number participates in this key.
+    """
+    models = ",".join(
+        f"{type_id:08X}:{group_id:08X}:{instance:016X}"
+        for type_id, group_id, instance in sorted(model_tgis)
+    )
+    return f"{os.path.basename(package_path)}::{source_instance:016X}::{models}"
+
+
+def _package_fingerprint(package_path: str) -> dict:
+    try:
+        stat = os.stat(package_path)
+        return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    except OSError:
+        return {"size": -1, "mtime_ns": -1}
+
+
+def _export_signature(opt: Options) -> dict:
+    """Options that affect whether a previous object export is reusable."""
+    return {
+        "obj": opt.obj,
+        "fbx": opt.fbx,
+        "png": opt.png,
+        "unity_mat": opt.unity_mat,
+        "pipeline": opt.mat_pipeline,
+        "colliders": opt.colliders,
+        "prefab": opt.prefab,
+        "dynamic": opt.dynamic,
+        "all_lods": opt.all_lods,
+        "no_cas": opt.no_cas,
+        "extract_geom": opt.extract_geom,
+    }
+
+
+def _manifest_path(out_root: str) -> str:
+    return os.path.join(out_root, _RESUME_MANIFEST)
+
+
+def _required_export_files(report: dict, out_root: str) -> list[str]:
+    """Return generated files whose absence means an object must be rebuilt."""
+    files = []
+    for mesh in report.get("meshes", []):
+        files.extend(mesh.get("files", []))
+    for texture in report.get("textures", []):
+        if texture.get("file"):
+            files.append(texture["file"])
+    for material in report.get("materials", []):
+        filename = material.get("file")
+        # Batch fixer assets are intentionally stored outside this object folder.
+        if filename and not filename.startswith(".."):
+            files.append(filename)
+    return sorted({filename for filename in files if filename})
+
+
+def _completed_object_manifest(out_root: str, identity: str, package_fingerprint: dict,
+                               signature: dict) -> bool:
+    """Validate a completion marker from a prior fully successful object export.
+
+    A mere folder or mesh name is intentionally *not* enough: a cancelled run
+    may already have written half of an object.  The atomic manifest is written
+    only after meshes, textures, materials and colliders have completed.
+    """
+    path = _manifest_path(out_root)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception:
+        return False
+    if manifest.get("schema") != _RESUME_SCHEMA:
+        return False
+    if manifest.get("object_identity") != identity:
+        return False
+    if manifest.get("package") != package_fingerprint:
+        return False
+    if manifest.get("options") != signature:
+        return False
+    required = manifest.get("required_files") or []
+    # An object with no actual mesh output is rechecked rather than trusted.
+    if not required:
+        return False
+    return all(os.path.isfile(os.path.join(out_root, filename)) for filename in required)
+
+
+def _write_completed_object_manifest(out_root: str, identity: str,
+                                     package_fingerprint: dict, signature: dict,
+                                     report: dict) -> None:
+    manifest = {
+        "schema": _RESUME_SCHEMA,
+        "object_identity": identity,
+        "package": package_fingerprint,
+        "options": signature,
+        "required_files": _required_export_files(report, out_root),
+        "completed_at": int(time.time()),
+    }
+    path = _manifest_path(out_root)
+    temp_path = path + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, path)
+
 
 def get_or_create_catalog_entry(pkg: DBPF, package_path: str, base_name: str, db_path: str = "catalog_database.json") -> tuple[str, str, str]:
     db = []
@@ -155,7 +289,7 @@ def _get_or_create_object_id(db_path: str, package_path: str, obj_name: str,
             db = []
 
     # Composite key to uniquely identify this object within the package
-    obj_key = f"{os.path.basename(package_path)}::{obj_name}::{source_instance:016X}"
+    obj_key = _catalog_object_key(package_path, obj_name, source_instance)
 
     for item in db:
         if item.get("_obj_key") == obj_key:
@@ -287,17 +421,45 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
     db_path = os.path.join(opt.out_dir, "catalog_database.json")
 
     all_reports = []
+    total_objects = len(objects)
+    package_fingerprint = _package_fingerprint(package_path)
+    signature = _export_signature(opt)
+    _notify_progress(
+        opt, "object_list", package=os.path.basename(package_path),
+        current=0, total=total_objects)
+
     for obj_index, obj_info in enumerate(objects):
+        current = obj_index + 1
         safe_name = "".join(c if c not in '<>:"/\\|?*' else '_' for c in obj_info.name).strip()
         if not safe_name:
             safe_name = f"object_{obj_index:04d}"
 
-        # Get or create a catalog ID for this specific object
+        # Get/create a numerical catalog ID, but use the immutable source
+        # instance in the resume identity. Thus '[0001] name' can be renamed
+        # visually without becoming the basis of a fragile name comparison.
         id_str = _get_or_create_object_id(
             db_path, package_path, safe_name,
             obj_info.stbl_name, obj_info.source_instance)
-
         out_root = os.path.join(opt.out_dir, f"[{id_str}] {safe_name}")
+        identity = _object_identity(
+            package_path, obj_info.source_instance, obj_info.model_tgis)
+
+        if opt.resume and _completed_object_manifest(
+                out_root, identity, package_fingerprint, signature):
+            _notify_progress(
+                opt, "object_skipped", package=os.path.basename(package_path),
+                current=current, total=total_objects, name=safe_name,
+                reason="already complete")
+            all_reports.append({
+                "package": package_path,
+                "out_dir": out_root,
+                "object_name": safe_name,
+                "total_resources": len(pkg.entries),
+                "meshes": [], "textures": [], "materials": [],
+                "colliders": [], "prefabs": [], "raw": [], "errors": [],
+                "skipped": True,
+            })
+            continue
 
         ctx = _ObjectContext(
             pkg=pkg,
@@ -307,14 +469,34 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
             out_root=out_root,
             modl_tgi_filter=set(obj_info.model_tgis),
             desc_str=obj_info.stbl_name or "",
+            progress_index=current,
+            progress_total=total_objects,
         )
+        _notify_progress(
+            opt, "object_started", package=os.path.basename(package_path),
+            current=current, total=total_objects, name=safe_name)
 
         try:
             obj_report = extract_package(
                 package_path, opt, _obj_ctx=ctx,
                 _resource_library=resource_library)
+            # The manifest is written only after the complete object pipeline
+            # returned. If Python/the user stops midway, it is absent and that
+            # one object is safely rebuilt on the next launch.
+            _write_completed_object_manifest(
+                out_root, identity, package_fingerprint, signature, obj_report)
+            obj_report["resume_manifest"] = _RESUME_MANIFEST
             all_reports.append(obj_report)
+            _notify_progress(
+                opt, "object_done", package=os.path.basename(package_path),
+                current=current, total=total_objects, name=safe_name,
+                meshes=len(obj_report.get("meshes", [])),
+                textures=len(obj_report.get("textures", [])))
         except Exception as e:
+            _notify_progress(
+                opt, "object_error", package=os.path.basename(package_path),
+                current=current, total=total_objects, name=safe_name,
+                error=str(e))
             all_reports.append({
                 "package": package_path,
                 "out_dir": out_root,
@@ -361,6 +543,9 @@ def extract_package(package_path: str, opt: Options,
         linked = LinkedResourceLibrary.for_package(package_path)
         if linked is not None:
             try:
+                _notify_progress(
+                    opt, "linked_family", package=os.path.basename(package_path),
+                    family=linked.describe().get("family_packages", []))
                 source_paths = linked.model_package_paths()
                 linked_reports = [
                     extract_package(source_path, opt, _resource_library=linked)
@@ -450,6 +635,12 @@ def extract_package(package_path: str, opt: Options,
         "raw": [],
         "errors": [],
     }
+
+    if _obj_ctx is not None:
+        _notify_progress(
+            opt, "object_stage", package=os.path.basename(package_path),
+            current=_obj_ctx.progress_index, total=_obj_ctx.progress_total,
+            name=safe_obj_name, stage="модели и LOD")
 
     if opt.raw:
         raw_dir = os.path.join(out_root, "raw")
@@ -573,6 +764,12 @@ def extract_package(package_path: str, opt: Options,
             "rcol": rec.get("rcol"),
         })
 
+    if _obj_ctx is not None:
+        _notify_progress(
+            opt, "object_stage", package=os.path.basename(package_path),
+            current=_obj_ctx.progress_index, total=_obj_ctx.progress_total,
+            name=safe_obj_name, stage="текстуры и материалы")
+
     png_files = []
     texture_by_key = {}
     if opt.png:
@@ -612,7 +809,23 @@ def extract_package(package_path: str, opt: Options,
                 # Header/index-only scan, once for the shared library. This
                 # lets a DLC object reuse base-game textures without manually
                 # declaring a relationship between any packs.
-                _resource_library.prepare_game_fallback()
+                if not _resource_library.game_fallback_ready:
+                    _notify_progress(
+                        opt, "resource_index_started", package=os.path.basename(package_path),
+                        current=(_obj_ctx.progress_index if _obj_ctx else 0),
+                        total=(_obj_ctx.progress_total if _obj_ctx else 0),
+                        name=safe_obj_name)
+
+                    def _index_progress(current, total, indexed_path):
+                        _notify_progress(
+                            opt, "resource_index_progress", package=os.path.basename(package_path),
+                            current=current, total=total,
+                            indexed_package=os.path.basename(indexed_path))
+
+                    _resource_library.prepare_game_fallback(_index_progress)
+                    _notify_progress(
+                        opt, "resource_index_done", package=os.path.basename(package_path),
+                        indexed_packages=_resource_library.describe().get("indexed_packages", 0))
 
             missing_count = 0
             non_image_count = 0
@@ -969,6 +1182,11 @@ def extract_package(package_path: str, opt: Options,
             unity.write_fbx_meta(rec["fbx"], mesh_material_guid_by_name.get(rec["name"], material_guid))
 
     if (opt.colliders or opt.prefab):
+        if _obj_ctx is not None:
+            _notify_progress(
+                opt, "object_stage", package=os.path.basename(package_path),
+                current=_obj_ctx.progress_index, total=_obj_ctx.progress_total,
+                name=safe_obj_name, stage="коллайдеры")
         lod0_records = [rec for rec in mesh_records if _lod_index(rec["name"]) == 0]
         if lod0_records:
             owner = lod0_records[0]

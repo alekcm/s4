@@ -134,7 +134,11 @@ class LinkedResourceLibrary:
             location = ResourceLocation(path, entry, scope, sequence)
             self._by_tgi[location.tgi].append(location)
 
-    def prepare_game_fallback(self) -> None:
+    @property
+    def game_fallback_ready(self) -> bool:
+        return self._game_indexed
+
+    def prepare_game_fallback(self, progress_callback=None) -> None:
         """Index installed Build/DeltaBuild packages once, if a game root exists.
 
         The method only reads each package's index table, not its full data. It
@@ -161,9 +165,15 @@ class LinkedResourceLibrary:
         # resource with the same TGI.
         candidates.sort(key=lambda p: (_is_delta_path(str(p)), str(p).lower()))
         next_sequence = len(self._indexed_paths)
-        for child in candidates:
+        total = len(candidates)
+        for current, child in enumerate(candidates, 1):
             self._index_package(str(child), "game-fallback", next_sequence)
             next_sequence += 1
+            if progress_callback is not None:
+                try:
+                    progress_callback(current, total, str(child))
+                except Exception:
+                    pass
 
     def resolve(self, tgi: tuple[int, int, int], preferred_path: str | None = None,
                 search_game: bool = True) -> ResourceLocation | None:

@@ -11,6 +11,7 @@ REM    --no-cas               (skip clothing/hair/body meshes)
 REM    --per-object           (each object in multi-object .package gets its own folder)
 REM    FullBuild link mode     (automatic: ClientFullBuild0 also searches sibling
 REM                             ClientFullBuild1/2... and installed game Build data)
+REM    Progress + resume       (live percentage/status; completed objects are skipped)
 REM ===================================================================
 cd /d "%~dp0"
 
@@ -122,8 +123,23 @@ echo [3/4] Starting extraction... >> "%LOGFILE%"
 echo File: %~1 >> "%LOGFILE%"
 echo. >> "%LOGFILE%"
 
-%PYEXE% -m s4extract "%~1" --pipeline hdrp --all-lods --no-cas >> "%LOGFILE%" 2>&1
-set "EXIT_CODE=%errorlevel%"
+REM Show object-level progress live and save exactly the same output to the log.
+REM PowerShell Tee-Object is present in supported Windows versions. Keep a
+REM redirect-only fallback for stripped Windows installations.
+set "S4EXTRACT_INPUT=%~1"
+set "LIVELOG=0"
+where powershell >nul 2>&1
+if errorlevel 1 (
+    %PYEXE% -m s4extract "%~1" --pipeline hdrp --all-lods --no-cas --progress --quiet >> "%LOGFILE%" 2>&1
+    set "EXIT_CODE=%errorlevel%"
+) else (
+    set "LIVELOG=1"
+    REM The whole -Command program is already inside CMD double-quotes: do not
+    REM add CMD caret escapes here. PowerShell must receive its native 2>&1 and
+    REM pipe tokens literally; 2^>&1 becomes invalid PowerShell syntax.
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "& { & $env:PYEXE -m s4extract $env:S4EXTRACT_INPUT --pipeline hdrp --all-lods --no-cas --progress --quiet 2>&1 | Tee-Object -FilePath $env:LOGFILE -Append; exit $LASTEXITCODE }"
+    set "EXIT_CODE=%errorlevel%"
+)
 
 echo. >> "%LOGFILE%"
 echo ======================================== >> "%LOGFILE%"
@@ -131,7 +147,12 @@ echo Finished. Exit code: %EXIT_CODE% >> "%LOGFILE%"
 echo ======================================== >> "%LOGFILE%"
 
 REM --- Show results ---
-type "%LOGFILE%"
+if "%LIVELOG%"=="0" (
+    type "%LOGFILE%"
+) else (
+    echo.
+    echo Live progress was written to the log above.
+)
 echo.
 echo ========================================
 echo Full log: s4extract_log.txt

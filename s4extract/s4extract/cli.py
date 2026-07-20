@@ -44,6 +44,88 @@ def _gather_packages(paths: list[str]) -> list[str]:
     return out
 
 
+class _ConsoleProgress:
+    """Line-oriented progress output that remains readable in .bat log files."""
+
+    def __init__(self):
+        self._last_index_bucket = -1
+
+    @staticmethod
+    def _bar(fraction: float, width: int = 20) -> str:
+        fraction = max(0.0, min(1.0, fraction))
+        filled = int(round(fraction * width))
+        return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+    @staticmethod
+    def _short(value: str, limit: int = 68) -> str:
+        if len(value) <= limit:
+            return value
+        return value[:limit - 3] + "..."
+
+    def __call__(self, event: str, **info) -> None:
+        current = int(info.get("current") or 0)
+        total = int(info.get("total") or 0)
+        name = self._short(str(info.get("name") or ""))
+        package = os.path.basename(str(info.get("package") or ""))
+
+        if event == "linked_family":
+            family = ", ".join(info.get("family") or [])
+            print(f"[linked] Найдены связанные пакеты: {family}", flush=True)
+            return
+
+        if event == "resource_index_started":
+            print("[index] Индексация Build/DeltaBuild ресурсов установленной игры...", flush=True)
+            self._last_index_bucket = -1
+            return
+        if event == "resource_index_progress":
+            # A package-by-package line is useful, but avoid flooding the log
+            # when a large installation has hundreds of build archives.
+            bucket = int((current * 20 / total)) if total else 20
+            if current != 1 and current != total and bucket == self._last_index_bucket:
+                return
+            self._last_index_bucket = bucket
+            frac = current / total if total else 1.0
+            indexed = os.path.basename(str(info.get("indexed_package") or ""))
+            print(f"[index] {self._bar(frac)} {frac * 100:5.1f}%  "
+                  f"{current}/{total}  {indexed}", flush=True)
+            return
+        if event == "resource_index_done":
+            print(f"[index] Готово: индексы {info.get('indexed_packages', 0)} пакетов.", flush=True)
+            return
+
+        if event == "object_list":
+            print(f"[objects] {package}: найдено объектов: {total}.", flush=True)
+            return
+
+        if total:
+            if event in ("object_done", "object_skipped"):
+                fraction = current / total
+            else:
+                fraction = (current - 1) / total
+            prefix = (f"{self._bar(fraction)} {fraction * 100:5.1f}%  "
+                      f"{current}/{total}")
+        else:
+            prefix = "[--------------------]   0.0%"
+
+        if event == "object_started":
+            text = "обработка"
+        elif event == "object_stage":
+            text = str(info.get("stage") or "обработка")
+        elif event == "object_skipped":
+            text = "пропуск: объект уже полностью экспортирован"
+        elif event == "object_done":
+            text = (f"готово: meshes={info.get('meshes', 0)}, "
+                    f"textures={info.get('textures', 0)}")
+        elif event == "object_error":
+            text = "ОШИБКА: " + self._short(str(info.get("error") or ""), 100)
+        elif event == "package_done":
+            print(f"[done] {package}: экспорт завершён.", flush=True)
+            return
+        else:
+            return
+        print(f"{prefix}  {name} — {text}", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="s4extract",
@@ -99,6 +181,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-game-resource-search", action="store_false", dest="game_resource_fallback",
                     default=True,
                     help="do not search installed Build/DeltaBuild packages for missing linked TGIs")
+    ap.add_argument("--no-resume", action="store_false", dest="resume", default=True,
+                    help="re-export all objects; ignore completed-object resume manifests")
+    ap.add_argument("--progress", action="store_true",
+                    help="show object-level progress and resume/skip status")
     ap.add_argument("-q", "--quiet", action="store_true")
     ap.add_argument("--json", action="store_true", help="print JSON report")
     ap.add_argument("--inspect", action="store_true",
@@ -118,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             print("\n" + "=" * 70 + "\n")
         return 0
 
+    progress_reporter = _ConsoleProgress() if args.progress else None
     opt = Options(
         out_dir=args.out,
         raw=args.raw,
@@ -142,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
         per_object=args.per_object,
         linked_fullbuilds=args.linked_fullbuilds,
         game_resource_fallback=args.game_resource_fallback,
+        resume=args.resume,
+        progress_callback=progress_reporter,
     )
 
     all_reports = []
@@ -154,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  FAILED: {e}", file=sys.stderr)
             continue
         all_reports.append(rep)
+        if progress_reporter is not None:
+            progress_reporter("package_done", package=pkg)
         if args.quiet:
             continue
         print(f"  -> {rep['out_dir']}")
@@ -199,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
 
     total_meshes = sum(len(r["meshes"]) for r in all_reports)
     total_tex = sum(len(r["textures"]) for r in all_reports)
-    if not args.quiet:
+    if not args.quiet or args.progress:
         print(f"\nDone. {len(all_reports)} package(s), {total_meshes} mesh(es), {total_tex} texture(s).")
     return 0
 
