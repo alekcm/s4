@@ -112,7 +112,11 @@ class _ConsoleProgress:
         elif event == "object_stage":
             text = str(info.get("stage") or "обработка")
         elif event == "object_skipped":
-            text = "пропуск: объект уже полностью экспортирован"
+            reason = str(info.get("reason") or "already complete")
+            if reason == "existing legacy mesh adopted":
+                text = "пропуск: найден старый экспорт, создан маркер продолжения"
+            else:
+                text = "пропуск: объект уже полностью экспортирован"
         elif event == "object_done":
             text = (f"готово: meshes={info.get('meshes', 0)}, "
                     f"textures={info.get('textures', 0)}")
@@ -160,6 +164,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--concavity-threshold", type=float, default=0.20,
                     help="Concavity threshold for recursive decomposition (0.0=always split, 1.0=never split). "
                          "Lower values produce more, smaller collider parts. Default 0.20.")
+    ap.add_argument("--coarse-collider-faces", type=int, default=20_000,
+                    help="switch high-poly LOD0 collider generation to fast large boxes at this face count (default 20000)")
+    ap.add_argument("--coarse-collider-vertices", type=int, default=8_000,
+                    help="also switch to fast large boxes at this LOD0 vertex count (default 8000)")
+    ap.add_argument("--coarse-collider-max-parts", type=int, default=12,
+                    help="maximum large collider boxes in automatic coarse mode (default 12)")
+    ap.add_argument("--coarse-collider-target-faces", type=int, default=15_000,
+                    help="rough face budget per large coarse collider block (default 15000)")
+    ap.add_argument("--no-coarse-colliders", action="store_true",
+                    help="always use the slower detailed collider decomposition")
     # Defaults: all_lods=True (extract all LODs), no_cas=True (skip CAS), extract_geom=False
     ap.add_argument("--all-lods", action="store_true", default=True,
                     help="(default on) extract all LOD levels")
@@ -231,6 +245,10 @@ def main(argv: list[str] | None = None) -> int:
         game_resource_fallback=args.game_resource_fallback,
         resume=args.resume,
         progress_callback=progress_reporter,
+        coarse_collider_face_threshold=(0 if args.no_coarse_colliders else args.coarse_collider_faces),
+        coarse_collider_vertex_threshold=(0 if args.no_coarse_colliders else args.coarse_collider_vertices),
+        coarse_collider_max_parts=args.coarse_collider_max_parts,
+        coarse_collider_target_faces=args.coarse_collider_target_faces,
     )
 
     all_reports = []
@@ -275,8 +293,10 @@ def main(argv: list[str] | None = None) -> int:
             kind_note = ", ".join(f"{k}={v}" for k, v in sorted(kinds.items()))
             if kind_note:
                 kind_note = "; " + kind_note
+            coarse_note = (f"; coarse, source_faces={collider.get('source_faces', 0)}"
+                           if collider.get("coarse") else "")
             print(f"  collider {collider['name']}: {collider['parts']} parts "
-                  f"[{collider['method']}{budget_note}{kind_note}]")
+                  f"[{collider['method']}{budget_note}{kind_note}{coarse_note}]")
         for pf in rep.get("prefabs", []):
             print(f"  prefab {pf['file']}: collider={pf['collider_method']} "
                   f"({pf['collider_parts']} parts), dynamic={pf['dynamic']}")

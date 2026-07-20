@@ -47,6 +47,10 @@ class Options:
     game_resource_fallback: bool = True  # искать отсутствующие TGI в Build/DeltaBuild установленной игры
     resume: bool = True  # пропускать ранее полностью экспортированные объекты
     progress_callback: Callable[..., None] | None = None  # CLI-индикатор процесса
+    coarse_collider_face_threshold: int = 20_000  # с этого числа граней включать быстрые крупные блоки
+    coarse_collider_vertex_threshold: int = 8_000  # либо с этого числа вершин (защита от O(V²) старого пути)
+    coarse_collider_max_parts: int = 12  # максимум крупных блоков в быстром режиме
+    coarse_collider_target_faces: int = 15_000  # ориентир граней на один крупный блок
 
 
 @dataclass
@@ -72,6 +76,7 @@ import time
 
 _RESUME_MANIFEST = ".s4extract_complete.json"
 _IN_PROGRESS_MANIFEST = ".s4extract_in_progress.json"
+_FORCE_REBUILD_MARKER = ".s4extract_rebuild"
 _RESUME_SCHEMA = 1
 
 
@@ -128,6 +133,10 @@ def _export_signature(opt: Options) -> dict:
         "all_lods": opt.all_lods,
         "no_cas": opt.no_cas,
         "extract_geom": opt.extract_geom,
+        "coarse_collider_face_threshold": opt.coarse_collider_face_threshold,
+        "coarse_collider_vertex_threshold": opt.coarse_collider_vertex_threshold,
+        "coarse_collider_max_parts": opt.coarse_collider_max_parts,
+        "coarse_collider_target_faces": opt.coarse_collider_target_faces,
     }
 
 
@@ -137,6 +146,10 @@ def _manifest_path(out_root: str) -> str:
 
 def _in_progress_path(out_root: str) -> str:
     return os.path.join(out_root, _IN_PROGRESS_MANIFEST)
+
+
+def _force_rebuild_path(out_root: str) -> str:
+    return os.path.join(out_root, _FORCE_REBUILD_MARKER)
 
 
 def _write_in_progress_marker(out_root: str, identity: str) -> None:
@@ -193,8 +206,16 @@ def _completed_object_manifest(out_root: str, identity: str, package_fingerprint
         return False
     if manifest.get("package") != package_fingerprint:
         return False
-    if manifest.get("options") != signature:
-        return False
+    saved_signature = manifest.get("options") or {}
+    # Coarse-collider knobs were added after the first resume release. Missing
+    # keys from an older completion marker must not make thousands of already
+    # finished objects start over; use --no-resume when a deliberate collider
+    # rebuild is wanted.
+    for key, value in signature.items():
+        if key.startswith("coarse_collider_") and key not in saved_signature:
+            continue
+        if saved_signature.get(key) != value:
+            return False
     required = manifest.get("required_files") or []
     # An object with no actual mesh output is rechecked rather than trusted.
     if not required:
@@ -523,10 +544,11 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
             package_path, obj_info.source_instance, obj_info.model_tgis)
 
         resume_reason = ""
-        if opt.resume and _completed_object_manifest(
+        force_rebuild = os.path.exists(_force_rebuild_path(out_root))
+        if opt.resume and not force_rebuild and _completed_object_manifest(
                 out_root, identity, package_fingerprint, signature):
             resume_reason = "already complete"
-        elif opt.resume and _adopt_legacy_object_export(
+        elif opt.resume and not force_rebuild and _adopt_legacy_object_export(
                 out_root, identity, package_fingerprint, signature):
             # Compatibility migration: prior versions had meshes but no marker.
             # Adopt them once, using the catalog-derived output path rather
@@ -576,6 +598,11 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
             _write_completed_object_manifest(
                 out_root, identity, package_fingerprint, signature, obj_report)
             _clear_in_progress_marker(out_root)
+            if force_rebuild:
+                try:
+                    os.remove(_force_rebuild_path(out_root))
+                except OSError:
+                    pass
             obj_report["resume_manifest"] = _RESUME_MANIFEST
             all_reports.append(obj_report)
             _notify_progress(
@@ -1314,6 +1341,20 @@ def extract_package(package_path: str, opt: Options,
                             except OSError:
                                 pass
 
+                coarse_by_faces = (opt.coarse_collider_face_threshold > 0
+                                   and len(agg_faces) >= opt.coarse_collider_face_threshold)
+                coarse_by_vertices = (opt.coarse_collider_vertex_threshold > 0
+                                      and len(agg_positions) >= opt.coarse_collider_vertex_threshold)
+                if _obj_ctx is not None and (coarse_by_faces or coarse_by_vertices):
+                    trigger = (f"{len(agg_faces):,} граней" if coarse_by_faces
+                               else f"{len(agg_positions):,} вершин")
+                    _notify_progress(
+                        opt, "object_stage", package=os.path.basename(package_path),
+                        current=_obj_ctx.progress_index, total=_obj_ctx.progress_total,
+                        name=safe_obj_name,
+                        stage=(f"быстрые крупные коллайдеры: {trigger} "
+                               f"-> до {opt.coarse_collider_max_parts} блоков"))
+
                 cset = col.build_colliders(
                     agg_positions, agg_faces,
                     normals=agg_normals if agg_normals else None,
@@ -1323,7 +1364,11 @@ def extract_package(package_path: str, opt: Options,
                     merge_max_inflation=opt.merge_max_inflation,
                     merge_contact_epsilon=opt.merge_contact_epsilon,
                     merge_max_deviation_ratio=opt.merge_max_deviation_ratio,
-                    concavity_threshold=opt.concavity_threshold)
+                    concavity_threshold=opt.concavity_threshold,
+                    coarse_face_threshold=opt.coarse_collider_face_threshold,
+                    coarse_vertex_threshold=opt.coarse_collider_vertex_threshold,
+                    coarse_max_parts=opt.coarse_collider_max_parts,
+                    coarse_target_faces=opt.coarse_collider_target_faces)
                 for ci, part in enumerate(cset.convex_parts):
                     if not part or not part.vertices or not part.faces:
                         continue
@@ -1355,7 +1400,9 @@ def extract_package(package_path: str, opt: Options,
                 report["colliders"].append({
                     "name": safe_obj_name,
                     "source_groups": len(lod0_records),
+                    "source_faces": len(agg_faces),
                     "method": cset.method,
+                    "coarse": cset.method.startswith("coarse_boxes"),
                     "parts": len(collider_guids),
                     "kinds": kind_counts,
                     "target_budget": opt.max_hulls,

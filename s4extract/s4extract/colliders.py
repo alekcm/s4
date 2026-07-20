@@ -1018,6 +1018,134 @@ def _build_part_from_face_ids(positions, faces, face_ids):
 
 
 # ---------------------------------------------------------------------------
+# Fast coarse collider mode for very high-poly environment objects
+# ---------------------------------------------------------------------------
+
+def _box_part_from_bounds(bounds_min, bounds_max, min_thickness=0.02):
+    """Create one valid convex box from axis-aligned bounds without scipy."""
+    mn = list(bounds_min)
+    mx = list(bounds_max)
+    for axis in range(3):
+        if mx[axis] - mn[axis] < min_thickness:
+            middle = (mx[axis] + mn[axis]) * 0.5
+            mn[axis] = middle - min_thickness * 0.5
+            mx[axis] = middle + min_thickness * 0.5
+    vertices = [
+        (mn[0], mn[1], mn[2]), (mx[0], mn[1], mn[2]),
+        (mx[0], mx[1], mn[2]), (mn[0], mx[1], mn[2]),
+        (mn[0], mn[1], mx[2]), (mx[0], mn[1], mx[2]),
+        (mx[0], mx[1], mx[2]), (mn[0], mx[1], mx[2]),
+    ]
+    faces = [
+        (0, 2, 1), (0, 3, 2),  # bottom
+        (4, 5, 6), (4, 6, 7),  # top
+        (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5),
+        (2, 3, 7), (2, 7, 6),
+        (3, 0, 4), (3, 4, 7),
+    ]
+    return ConvexPart(vertices=vertices, faces=faces, kind="box")
+
+
+def _build_coarse_box_colliders(positions, faces, max_parts=12,
+                                 target_faces_per_part=15000) -> ColliderSet:
+    """Build a deliberately coarse compound collider in one linear face pass.
+
+    This mode is for bridges, buildings and other environment-scale meshes for
+    which recursive concavity analysis creates thousands of tiny hulls and can
+    take minutes. Faces are divided into large spatial blocks along the longest
+    horizontal span; tall assets receive two broad elevation layers when the
+    part budget permits it. Each non-empty block becomes an 8-vertex box.
+
+    It intentionally favours a small, stable collision approximation over
+    detail: there is no per-edge segmentation, convex-hull calculation, scipy,
+    recursive decomposition or neighbour merging in this path.
+    """
+    cs = ColliderSet()
+    cs.bbox_min, cs.bbox_max = _compute_bbox(positions)
+    if not positions or not faces:
+        cs.method = "coarse_boxes"
+        return cs
+
+    min_x, min_y, min_z = cs.bbox_min
+    max_x, max_y, max_z = cs.bbox_max
+    spans = (max_x - min_x, max_y - min_y, max_z - min_z)
+    # Bridges normally run along X/Z. Prefer the longer horizontal axis even
+    # when a tall tower makes Y numerically larger.
+    primary_axis = 0 if spans[0] >= spans[2] else 2
+    horizontal_span = spans[primary_axis]
+    vertical_span = spans[1]
+
+    requested = max(1, int(math.ceil(len(faces) / max(1, target_faces_per_part))))
+    # A landmark can be geometrically huge without reaching the triangle
+    # target (this EP04 bridge is ~103 m long but only ~8.8k triangles). One
+    # AABB would seal the whole underpass, so reserve a few *large* blocks by
+    # world span, not by tiny-detail density.
+    if horizontal_span >= 40.0:
+        requested = max(requested, 6)
+    elif horizontal_span >= 15.0:
+        requested = max(requested, 4)
+    requested = min(max(1, max_parts), requested)
+
+    # Split deck/supports into broad upper/lower bands only when it can do so
+    # without exceeding the requested total amount of large collider pieces.
+    vertical_layers = 1
+    if requested >= 4 and vertical_span > max(horizontal_span * 0.12, 0.5):
+        vertical_layers = 2
+    longitudinal_bins = max(1, min(max_parts // vertical_layers, requested // vertical_layers))
+    if longitudinal_bins < 1:
+        longitudinal_bins = 1
+
+    axis_min = (min_x, min_y, min_z)[primary_axis]
+    axis_span = max(horizontal_span, 1e-8)
+    y_span = max(vertical_span, 1e-8)
+    groups = {}  # (longitudinal_bin, vertical_layer) -> [minx,miny,minz,maxx,maxy,maxz,count]
+
+    for face in faces:
+        try:
+            ia, ib, ic = face
+            pa, pb, pc = positions[ia], positions[ib], positions[ic]
+        except (IndexError, TypeError, ValueError):
+            continue
+        center_axis = (pa[primary_axis] + pb[primary_axis] + pc[primary_axis]) / 3.0
+        long_bin = min(longitudinal_bins - 1, max(
+            0, int((center_axis - axis_min) / axis_span * longitudinal_bins)))
+        if vertical_layers == 1:
+            layer = 0
+        else:
+            center_y = (pa[1] + pb[1] + pc[1]) / 3.0
+            layer = min(vertical_layers - 1, max(
+                0, int((center_y - min_y) / y_span * vertical_layers)))
+        key = (long_bin, layer)
+        xs = (pa[0], pb[0], pc[0])
+        ys = (pa[1], pb[1], pc[1])
+        zs = (pa[2], pb[2], pc[2])
+        if key not in groups:
+            groups[key] = [min(xs), min(ys), min(zs), max(xs), max(ys), max(zs), 1]
+        else:
+            item = groups[key]
+            item[0] = min(item[0], min(xs)); item[1] = min(item[1], min(ys)); item[2] = min(item[2], min(zs))
+            item[3] = max(item[3], max(xs)); item[4] = max(item[4], max(ys)); item[5] = max(item[5], max(zs))
+            item[6] += 1
+
+    # Keep every populated spatial region. A sparse distant support is more
+    # useful than spending time joining it to a huge deck AABB.
+    object_diagonal = math.dist(cs.bbox_min, cs.bbox_max)
+    min_thickness = max(0.02, object_diagonal * 0.001)
+    for _key, item in sorted(groups.items()):
+        bounds_min = (item[0], item[1], item[2])
+        bounds_max = (item[3], item[4], item[5])
+        cs.convex_parts.append(_box_part_from_bounds(bounds_min, bounds_max, min_thickness))
+
+    # Degenerate malformed face data can leave no groups; use one overall box
+    # rather than falling into the expensive exact path.
+    if not cs.convex_parts:
+        cs.convex_parts.append(_box_part_from_bounds(cs.bbox_min, cs.bbox_max, min_thickness))
+    cs.method = "coarse_boxes"
+    return cs
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -1029,7 +1157,11 @@ def build_colliders(positions, faces,
                     merge_max_inflation: float = 0.03,
                     merge_contact_epsilon: float = 0.002,
                     merge_max_deviation_ratio: float = 0.005,
-                    concavity_threshold: float = 0.20) -> ColliderSet:
+                    concavity_threshold: float = 0.20,
+                    coarse_face_threshold: int = 20_000,
+                    coarse_vertex_threshold: int = 8_000,
+                    coarse_max_parts: int = 12,
+                    coarse_target_faces: int = 15_000) -> ColliderSet:
     """Return a ColliderSet split by connected components (loose parts).
 
     Tries to find connected components of the mesh (loose parts) with surface-normal
@@ -1049,6 +1181,24 @@ def build_colliders(positions, faces,
         cs.method = "box"
         return cs
 
+    # High-poly environment objects are not worth feeding through the exact
+    # recursive concavity path. Its edge/face analysis grows very expensive
+    # and produces collision fragments far smaller than gameplay needs.
+    #
+    # Face count alone is not sufficient: the EP04 elevated freeway has only
+    # ~8.8k triangles but ~11.7k split render vertices. The old weld loop was
+    # quadratic in exactly that vertex count, which is why it appeared frozen.
+    coarse_by_faces = coarse_face_threshold > 0 and len(faces) >= coarse_face_threshold
+    coarse_by_vertices = coarse_vertex_threshold > 0 and len(positions) >= coarse_vertex_threshold
+    if coarse_by_faces or coarse_by_vertices:
+        coarse = _build_coarse_box_colliders(
+            positions, faces,
+            max_parts=coarse_max_parts,
+            target_faces_per_part=coarse_target_faces)
+        if max_hulls > 0 and len(coarse.convex_parts) > max_hulls:
+            coarse.method = "coarse_boxes_over_budget"
+        return coarse
+
     try:
         # Step 1: Weld duplicate vertex positions.
         use_normals = normals is not None and len(normals) == len(positions)
@@ -1056,28 +1206,32 @@ def build_colliders(positions, faces,
         decimals = 5
 
         unique_pos_and_normal_to_idx = []
+        # Old code scanned every previously-seen vertex for every new vertex:
+        # O(V^2). On the freeway's 11,676 vertices that is ~136 million Python
+        # comparisons before collider decomposition even begins. Bucket only
+        # identical rounded positions; a UV-seamed mesh has just a handful of
+        # different normals per position, so this preserves behavior at O(V).
+        position_buckets = {}
         vertex_map = []
 
         for i, p in enumerate(positions):
             rounded_p = (round(p[0], decimals), round(p[1], decimals), round(p[2], decimals))
             n = normals[i] if use_normals else (0.0, 1.0, 0.0)
+            bucket = position_buckets.setdefault(rounded_p, [])
 
             found_idx = None
             if use_normals:
-                for up, un, uidx in unique_pos_and_normal_to_idx:
-                    if up == rounded_p:
-                        if _dot(un, n) >= normal_threshold_cos:
-                            found_idx = uidx
-                            break
-            else:
-                for up, un, uidx in unique_pos_and_normal_to_idx:
-                    if up == rounded_p:
+                for un, uidx in bucket:
+                    if _dot(un, n) >= normal_threshold_cos:
                         found_idx = uidx
                         break
+            elif bucket:
+                found_idx = bucket[0][1]
 
             if found_idx is None:
                 found_idx = len(unique_pos_and_normal_to_idx)
                 unique_pos_and_normal_to_idx.append((rounded_p, n, found_idx))
+                bucket.append((n, found_idx))
 
             vertex_map.append(found_idx)
 
