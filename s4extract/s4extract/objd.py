@@ -31,6 +31,9 @@ from dataclasses import dataclass, field
 
 from .dbpf import DBPF
 from . import resource_types as rt
+from .catalog_tags import (
+    parse_cobj_metadata, merge_tag_ids, merge_style_tgis,
+)
 
 # ---------------------------------------------------------------------------
 # Known catalog / object-definition type IDs
@@ -69,6 +72,11 @@ class ObjectInfo:
     model_tgis: list[tuple[int, int, int]] = field(default_factory=list)
     source_type: int = 0            # type_id of the source entry
     source_instance: int = 0        # instance of the source entry
+    catalog_tags: list[int] = field(default_factory=list)  # union of COBJ swatch tags
+    # In CATALOG/COBJ index order: one raw tag list per swatch. COBJ color tags
+    # are meaningful here, unlike the all-swatch union above.
+    catalog_swatch_tags: list[list[int]] = field(default_factory=list)
+    product_styles: list[tuple[int, int, int]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +359,17 @@ def discover_objects(pkg: DBPF) -> list[ObjectInfo]:
     mlod_gi_set = {(e.group_id, e.instance) for e in pkg.find(rt.MLOD)}
     model_gi_set = modl_gi_set | mlod_gi_set
 
+    # COBJ and CATALOG swatches share an instance ID. Parse COBJ once here so
+    # every discovered object can retain its in-game category/style tags.
+    cobj_metadata_by_instance = {}
+    for cobj_entry in pkg.find(COBJ):
+        try:
+            metadata = parse_cobj_metadata(pkg.read_resource(cobj_entry))
+        except Exception:
+            metadata = None
+        if metadata is not None:
+            cobj_metadata_by_instance[cobj_entry.instance] = metadata
+
     # ------------------------------------------------------------------
     # Phase 1: CATALOG entries (most reliable source)
     # ------------------------------------------------------------------
@@ -378,12 +397,16 @@ def discover_objects(pkg: DBPF) -> list[ObjectInfo]:
         if not name:
             name = f"object_{e.instance:016X}"
 
+        metadata = cobj_metadata_by_instance.get(e.instance)
         objects.append(ObjectInfo(
             name=name,
             stbl_name="",
             model_tgis=valid_model_tgis,
             source_type=e.type_id,
             source_instance=e.instance,
+            catalog_tags=list(metadata.tags) if metadata else [],
+            catalog_swatch_tags=[list(metadata.tags)] if metadata else [],
+            product_styles=list(metadata.product_styles) if metadata else [],
         ))
 
     # If CATALOG found objects, use those (they're the most reliable)
@@ -418,12 +441,16 @@ def discover_objects(pkg: DBPF) -> list[ObjectInfo]:
             stbl_name = _lookup_stbl_name(pkg, e.instance)
             name = stbl_name or f"object_{e.instance:016X}"
 
+        metadata = cobj_metadata_by_instance.get(e.instance)
         objects.append(ObjectInfo(
             name=name,
             stbl_name=stbl_name,
             model_tgis=valid_model_tgis,
             source_type=e.type_id,
             source_instance=e.instance,
+            catalog_tags=list(metadata.tags) if metadata else [],
+            catalog_swatch_tags=[list(metadata.tags)] if metadata else [],
+            product_styles=list(metadata.product_styles) if metadata else [],
         ))
 
     if objects:
@@ -457,12 +484,16 @@ def discover_objects(pkg: DBPF) -> list[ObjectInfo]:
             stbl_name = _lookup_stbl_name(pkg, e.instance)
             name = stbl_name or f"object_{e.instance:016X}"
 
+        metadata = cobj_metadata_by_instance.get(e.instance)
         objects.append(ObjectInfo(
             name=name,
             stbl_name=stbl_name,
             model_tgis=valid_model_tgis,
             source_type=e.type_id,
             source_instance=e.instance,
+            catalog_tags=list(metadata.tags) if metadata else [],
+            catalog_swatch_tags=[list(metadata.tags)] if metadata else [],
+            product_styles=list(metadata.product_styles) if metadata else [],
         ))
 
     return _deduplicate_objects(objects)
@@ -479,6 +510,12 @@ def _deduplicate_objects(objects: list[ObjectInfo]) -> list[ObjectInfo]:
     for obj in objects:
         primary_key = obj.model_tgis[0] if obj.model_tgis else None
         if primary_key and primary_key in seen_modl:
+            # CATALOG has one entry per swatch. Keep one object folder but
+            # retain the union of category/style tags from every swatch.
+            existing = seen_modl[primary_key]
+            existing.catalog_tags = merge_tag_ids([existing.catalog_tags, obj.catalog_tags])
+            existing.catalog_swatch_tags.extend(obj.catalog_swatch_tags)
+            existing.product_styles = merge_style_tgis([existing.product_styles, obj.product_styles])
             continue
         if primary_key:
             seen_modl[primary_key] = obj

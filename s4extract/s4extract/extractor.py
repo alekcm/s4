@@ -17,6 +17,11 @@ from . import resource_types as rt
 from . import textures
 from . import unity
 from . import colliders as col
+from . import catalog_ai
+from .catalog_tags import (
+    ai_semantic_tags, ai_variant_color_tags, ai_product_style_tags,
+    product_style_keys,
+)
 from .linked_resources import LinkedResourceLibrary
 
 
@@ -67,6 +72,9 @@ class _ObjectContext:
     desc_str: str = ""
     progress_index: int = 0
     progress_total: int = 0
+    catalog_tags: list[int] = None
+    catalog_swatch_tags: list[list[int]] = None
+    product_styles: list[tuple[int, int, int]] = None
 
 
 import json
@@ -507,6 +515,30 @@ def _compute_component_centroid(positions, faces, face_ids):
     return (cx, cy, cz)
 
 
+def _catalog_swatch_variants(swatch_tag_lists) -> list[list]:
+    """Convert per-COBJ-swatch Color_* tags into [swatch_index, tags] rows."""
+    variants = []
+    for index, tag_ids in enumerate(swatch_tag_lists or []):
+        colors = ai_variant_color_tags(tag_ids)
+        # Keep the swatch row even when EA omitted Color_* tags: it still tells
+        # the AI that a selectable material variant exists.
+        variants.append([index, colors])
+    return variants
+
+
+def _mesh_records_lod0_dimensions(mesh_records: list[dict]) -> list[float] | None:
+    """Combined visible LOD0 bounds, stored as [x, y, z] raw dimensions."""
+    selected = [record for record in mesh_records if "_lod00" in record.get("name", "").lower()]
+    if not selected:
+        selected = mesh_records
+    values = [point for record in selected for point in record.get("positions", [])]
+    if not values:
+        return None
+    minimum = [min(point[axis] for point in values) for axis in range(3)]
+    maximum = [max(point[axis] for point in values) for axis in range(3)]
+    return [round(maximum[axis] - minimum[axis], 6) for axis in range(3)]
+
+
 def _extract_per_object(pkg: DBPF, opt: Options, base: str,
                         package_path: str, objects: list,
                         resource_library: LinkedResourceLibrary | None = None) -> dict:
@@ -567,6 +599,11 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
                 "total_resources": len(pkg.entries),
                 "meshes": [], "textures": [], "materials": [],
                 "colliders": [], "prefabs": [], "raw": [], "errors": [],
+                "catalog_id": id_str,
+                "catalog_tags": ai_semantic_tags(obj_info.catalog_tags or []),
+                "catalog_styles": ai_product_style_tags(obj_info.product_styles or []),
+                "catalog_style_refs": product_style_keys(obj_info.product_styles or []),
+                "catalog_variants": _catalog_swatch_variants(obj_info.catalog_swatch_tags),
                 "skipped": True,
                 "skip_reason": resume_reason,
             })
@@ -582,6 +619,9 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
             desc_str=obj_info.stbl_name or "",
             progress_index=current,
             progress_total=total_objects,
+            catalog_tags=list(obj_info.catalog_tags),
+            catalog_swatch_tags=[list(tags) for tags in obj_info.catalog_swatch_tags],
+            product_styles=list(obj_info.product_styles),
         )
         _notify_progress(
             opt, "object_started", package=os.path.basename(package_path),
@@ -647,6 +687,31 @@ def _extract_per_object(pkg: DBPF, opt: Options, base: str,
         for key in ("meshes", "textures", "materials", "colliders", "prefabs", "raw", "errors"):
             combined[key].extend(r.get(key, []))
 
+    try:
+        dimension_updates = [(r["catalog_id"], r["dimensions"])
+                             for r in all_reports
+                             if r.get("catalog_id") and r.get("dimensions")]
+        tag_updates = [(r["catalog_id"], r["catalog_tags"])
+                       for r in all_reports
+                       if r.get("catalog_id") and r.get("catalog_tags") is not None]
+        style_updates = [(r["catalog_id"], r["catalog_styles"])
+                         for r in all_reports
+                         if r.get("catalog_id") and r.get("catalog_styles") is not None]
+        style_ref_updates = [(r["catalog_id"], r["catalog_style_refs"])
+                             for r in all_reports
+                             if r.get("catalog_id") and r.get("catalog_style_refs") is not None]
+        variant_updates = [(r["catalog_id"], r["catalog_variants"])
+                           for r in all_reports
+                           if r.get("catalog_id") and r.get("catalog_variants") is not None]
+        catalog_ai.update_dimensions_bulk(opt.out_dir, dimension_updates)
+        catalog_ai.update_catalog_tags_bulk(opt.out_dir, tag_updates)
+        catalog_ai.update_catalog_styles_bulk(opt.out_dir, style_updates)
+        catalog_ai.update_catalog_style_refs_bulk(opt.out_dir, style_ref_updates)
+        catalog_ai.update_catalog_variants_bulk(opt.out_dir, variant_updates)
+        combined["ai_catalog"] = catalog_ai.build_ai_catalog(opt.out_dir)
+    except Exception as exc:
+        combined["errors"].append(f"catalog AI: {exc}")
+
     return combined
 
 
@@ -697,6 +762,9 @@ def extract_package(package_path: str, opt: Options,
     base = os.path.splitext(os.path.basename(package_path))[0]
 
     # --- Per-object discovery (only at the top level, not for recursive calls) ---
+    # A single-object COBJ package keeps the legacy output folder layout, but
+    # still contributes its COBJ catalog tags to the AI catalog below.
+    catalog_object_info = None
     if _obj_ctx is None and opt.per_object:
         from .objd import discover_objects
         objects = discover_objects(pkg)
@@ -704,6 +772,8 @@ def extract_package(package_path: str, opt: Options,
             return _extract_per_object(
                 pkg, opt, base, package_path, objects,
                 resource_library=_resource_library)
+        if len(objects) == 1:
+            catalog_object_info = objects[0]
 
     # Create the output directory first so the catalog can be saved inside it
     os.makedirs(opt.out_dir, exist_ok=True)
@@ -755,10 +825,21 @@ def extract_package(package_path: str, opt: Options,
     }
 
     if _obj_ctx is not None:
+        # Keep only semantic Buy/Build tags. Functional tags such as Func_Sleep
+        # or Funk_HideAndSeek are deliberately omitted from the AI catalog.
+        report["catalog_tags"] = ai_semantic_tags(_obj_ctx.catalog_tags or [])
+        report["catalog_styles"] = ai_product_style_tags(_obj_ctx.product_styles or [])
+        report["catalog_style_refs"] = product_style_keys(_obj_ctx.product_styles or [])
+        report["catalog_variants"] = _catalog_swatch_variants(_obj_ctx.catalog_swatch_tags)
         _notify_progress(
             opt, "object_stage", package=os.path.basename(package_path),
             current=_obj_ctx.progress_index, total=_obj_ctx.progress_total,
             name=safe_obj_name, stage="модели и LOD")
+    elif catalog_object_info is not None:
+        report["catalog_tags"] = ai_semantic_tags(catalog_object_info.catalog_tags or [])
+        report["catalog_styles"] = ai_product_style_tags(catalog_object_info.product_styles or [])
+        report["catalog_style_refs"] = product_style_keys(catalog_object_info.product_styles or [])
+        report["catalog_variants"] = _catalog_swatch_variants(catalog_object_info.catalog_swatch_tags)
 
     if opt.raw:
         raw_dir = os.path.join(out_root, "raw")
@@ -881,6 +962,13 @@ def extract_package(package_path: str, opt: Options,
             "material_ref": rec.get("material_ref"),
             "rcol": rec.get("rcol"),
         })
+
+    catalog_dimensions = _mesh_records_lod0_dimensions(mesh_records)
+    if catalog_dimensions is not None:
+        # Defer the database write until the enclosing package batch finishes;
+        # writing an 8k-object JSON file for every chair would be needlessly slow.
+        report["catalog_id"] = id_str
+        report["dimensions"] = catalog_dimensions
 
     if _obj_ctx is not None:
         _notify_progress(
@@ -1423,6 +1511,27 @@ def extract_package(package_path: str, opt: Options,
                     "collider_parts": len(collider_guids),
                     "dynamic": opt.dynamic,
                 })
+
+    if _obj_ctx is None:
+        try:
+            if report.get("catalog_id") and report.get("dimensions"):
+                catalog_ai.update_dimensions_bulk(
+                    opt.out_dir, [(report["catalog_id"], report["dimensions"])])
+            if report.get("catalog_id") and report.get("catalog_tags") is not None:
+                catalog_ai.update_catalog_tags_bulk(
+                    opt.out_dir, [(report["catalog_id"], report["catalog_tags"])])
+            if report.get("catalog_id") and report.get("catalog_styles") is not None:
+                catalog_ai.update_catalog_styles_bulk(
+                    opt.out_dir, [(report["catalog_id"], report["catalog_styles"])])
+            if report.get("catalog_id") and report.get("catalog_style_refs") is not None:
+                catalog_ai.update_catalog_style_refs_bulk(
+                    opt.out_dir, [(report["catalog_id"], report["catalog_style_refs"])])
+            if report.get("catalog_id") and report.get("catalog_variants") is not None:
+                catalog_ai.update_catalog_variants_bulk(
+                    opt.out_dir, [(report["catalog_id"], report["catalog_variants"])])
+            report["ai_catalog"] = catalog_ai.build_ai_catalog(opt.out_dir)
+        except Exception as exc:
+            report["errors"].append(f"catalog AI: {exc}")
 
     return report
 

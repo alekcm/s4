@@ -204,7 +204,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--inspect", action="store_true",
                     help="diagnostic mode: print what is inside each package "
                          "(types, sizes, magic signatures) and exit")
+    ap.add_argument("--build-ai-catalog", action="store_true",
+                    help="rebuild compact catalog_ai.json from an existing output folder and exit")
     args = ap.parse_args(argv)
+
+    if args.build_ai_catalog:
+        from . import catalog_ai
+        # Explicit catalog rebuild is the one-time migration path for old
+        # exports: it may scan their LOD0 OBJ files to backfill dimensions.
+        summary = catalog_ai.build_ai_catalog(args.out, backfill=True)
+        print(f"AI catalog: {summary['objects']} objects, unit={summary['unit']}, "
+              f"backfilled={summary['backfilled']} -> {os.path.join(args.out, summary['path'])}")
+        return 0
 
     packages = _gather_packages(args.inputs) if args.inputs else []
     if not packages:
